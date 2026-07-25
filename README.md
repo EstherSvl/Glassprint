@@ -156,18 +156,69 @@ glass genuinely takes over. Blending the artwork toward the glass colour instead
 would leave the underbase at full density and print a solid white patch with
 pale ink on it — a sticker fading, not ink dissolving.
 
-### Two ways to express it, and they mix
+### One ramp, three ways to render it
 
-| | What it does | On glass |
+| | What it does | Suits |
 | --- | --- | --- |
-| **Tonal** (`--fade-dissolve 0`) | Every element gets more transparent | Smooth, but the tail runs into the printer's dither floor and goes speckly |
-| **Dissolve** (`--fade-dissolve 1`) | Whole elements drop out at an increasing rate; survivors stay fully opaque | Never prints faint, so never speckles. Reads as the pattern thinning out |
+| **Tonal** (the default) | Every element gets more transparent | Anything — but with a white base the tail runs into the printer's dither floor and goes speckly |
+| **Dissolve** (`--fade-dissolve 1`) | Whole elements drop out at an increasing rate; survivors stay fully opaque | Repeating patterns of discrete motifs |
+| **Dot screen** (`--fade-halftone 1.5`) | Manga screentone: tone from dot *size*, every dot full-strength | Solid areas and large motifs, which dissolve can only take or leave |
 
-**For a repeating pattern, dissolve is usually the better answer** — nothing is
-ever printed at an unprintable density. In between (say `0.5`) some elements
-fade faster than others, which gives a softer, more organic scatter.
+Dissolve and the dot screen are the same trick at different scales — tone from
+*how much* full-strength ink there is, never from how dilute it is. Both dodge
+the dither floor entirely, because nothing is ever laid down faint.
+
+Pick by what your artwork is made of. **Discrete motifs → dissolve.** A
+`--fade-dissolve 0.5` in between staggers the two, so some elements fade faster
+than others, which scatters more organically than either end.
 
 ![a pattern dissolving down a panel, previewed on green glass](docs/fade-dissolve.png)
+
+**One solid shape → dot screen**, because dissolve sees one element and can only
+keep or drop it. Element dropout is one seeded draw per element, so the same
+settings always give the same scatter — preview and export match, and a reprint
+next year matches too.
+
+![the same pattern as a dot screen, printed without a white base](docs/fade-halftone.png)
+
+> **Keep the screen coarse — 1 mm or above.** The E1's RIP is halftoning at
+> device resolution as well, and a fine screen of yours beats against its screen
+> and moirés. At 1–3 mm a dot spans hundreds of device pixels, so there is
+> nothing to interfere with and the dots read as deliberate texture. Under
+> 0.8 mm the tool warns you.
+
+Dot area is faithful to the ramp (asking for 25% coverage lays down 25.3%), and
+100% is genuinely solid, so the top of a gradient is untouched artwork.
+
+## Printing without a white base
+
+Leaving the white underbase off changes what a fade does, and mostly for the
+better.
+
+With white, a fade crosses a **change of material** — opaque, light-scattering
+ink at one end, bare glass at the other. That is a long perceptual distance, and
+its last stretch is where the dither floor lives. White is also the highest
+contrast thing you can put on clear glass, so sparse coverage reads as visible
+speckle.
+
+Without white, the ink is a glaze. Printed and unprinted areas are both
+transparent and differ only by a tint, so the fade travels a much shorter
+distance and sparse coverage reads as a *thinner tint* rather than as specks. A
+plain tonal fade is fine — the printability warning stands down when you tell
+the tool you are printing this way.
+
+What you trade away:
+
+- **Colour fidelity.** Every ink multiplies with the glass. On green glass reds
+  go brown, blues go teal, yellows nearly vanish.
+- **The light end of your range.** Pale colours have little to multiply with, so
+  the usable range compresses toward the dark. Design deeper and more saturated.
+
+Switch the preview between **White base** and **No white base** above the
+canvas. The no-white mode multiplies the artwork with your glass colour, which
+is the same maths the ink does — so what you see is what the glaze will look
+like. It changes the preview only; the exported files are identical either way,
+since the underbase is Studio's decision, not the file's.
 
 Element dropout is one draw per element from `--fade-seed`, so the same settings
 always produce the same scatter — preview and export match, and you can re-run a
@@ -183,6 +234,8 @@ print months later and get the same object.
 | `--fade-curve` | The rate. 1 is linear; above 1 holds the ink then drops away late; below 1 drops away immediately then trails off |
 | `--fade-min` / `--fade-max` | The two ends of the ramp. Raise `--fade-min` to fade to a ghost rather than to nothing |
 | `--fade-dissolve` | Tonal ↔ dropout, as above |
+| `--fade-halftone` | Dot screen pitch in mm. Takes precedence over dissolve — they express the same ramp |
+| `--fade-halftone-angle` | Screen angle. 45° is traditional and least obtrusive |
 | `--fade-per-element` | Give each element one opacity instead of letting the ramp cut through it. Keeps motifs crisp |
 | `--fade-what` | **Which elements fade**, in the same language as `--keep` |
 | `--fade-invert` | Reverse the direction |

@@ -85,6 +85,8 @@ function buildSpec() {
       per_element: $("fade-per-element").checked,
       dissolve: Number($("fade-dissolve").value),
       seed: num("fade-seed", 0),
+      halftone_mm: Number($("fade-halftone").value),
+      halftone_angle: Number($("fade-halftone-angle").value),
       invert: $("fade-invert").checked,
       cutoff: Number($("fade-cutoff").value),
     },
@@ -175,11 +177,15 @@ function renderReadout(summary) {
     rows.push(["Fade", fade.describe + over]);
     rows.push(["Faintest ink", `${asCoverage(faintest)} coverage`]);
 
-    if (faintest > 0 && faintest < 0.12) {
+    // The dither floor is a white-underbase problem. Without white the ink is
+    // a glaze, sparse coverage reads as a thinner tint rather than as specks,
+    // and a plain tonal fade is fine.
+    if (faintest > 0 && faintest < 0.12 && !inkOnGlass()) {
       warnings.push(
-        `The thinnest ink is at ${asCoverage(faintest)} coverage. UV dithering tends to ` +
-          "go speckly under about 12% — raise the end opacity, add some dissolve, or set " +
-          "a minimum printable ink level."
+        `The thinnest ink is at ${asCoverage(faintest)} coverage. With a white underbase ` +
+          "UV dithering tends to go speckly under about 12% — raise the end opacity, add " +
+          "dissolve or a dot screen, or set a minimum printable ink level. Printing " +
+          "without white? Switch the preview above and this stops mattering."
       );
     }
   }
@@ -383,16 +389,34 @@ function updateLabels() {
   const cutoff = Number($("fade-cutoff").value);
   $("fade-cutoff-value").textContent = cutoff > 0 ? `${Math.round(cutoff * 100)}%` : "off";
 
+  const pitch = Number($("fade-halftone").value);
+  $("fade-halftone-value").textContent = pitch > 0 ? `${pitch.toFixed(2)} mm` : "off";
+  $("fade-halftone-angle-value").textContent = `${$("fade-halftone-angle").value}°`;
+
   $("fade-body").hidden = state.fadeMode === "none";
   $("fade-angle-field").hidden = state.fadeMode !== "linear";
   $("fade-center-row").hidden = state.fadeMode !== "radial";
+  // The screen and the element controls express the same ramp; only one wins.
+  $("fade-dissolve").closest(".field").style.opacity = pitch > 0 ? "0.45" : "1";
 }
 
 function applyGlassBackdrop() {
+  const noWhite = $("ink-mode").value === "none";
+  // Without a white underbase the ink is a glaze, so it has to be multiplied
+  // with the glass rather than laid on top of it — which means the glass
+  // colour is no longer optional.
+  if (noWhite) $("glass-on").checked = true;
+
   const on = $("glass-on").checked;
   const viewport = $("viewport");
   viewport.classList.toggle("on-glass", on);
   viewport.style.backgroundColor = on ? $("glass-color").value : "";
+  $("preview").style.mixBlendMode = on && noWhite ? "multiply" : "normal";
+  $("glass-on").disabled = noWhite;
+}
+
+function inkOnGlass() {
+  return $("ink-mode").value === "none" && $("glass-on").checked;
 }
 
 function linkColor(pickerId, hexId) {
@@ -459,10 +483,14 @@ function init() {
     "saturation", "brightness", "contrast", "opacity", "blend",
     "fade-what", "fade-angle", "fade-start", "fade-end", "fade-curve", "fade-dissolve",
     "fade-min", "fade-max", "fade-center-x", "fade-center-y", "fade-cutoff",
-    "fade-per-element", "fade-invert", "fade-seed",
+    "fade-per-element", "fade-invert", "fade-seed", "fade-halftone", "fade-halftone-angle",
   ]);
 
   $("glass-on").addEventListener("change", applyGlassBackdrop);
+  $("ink-mode").addEventListener("change", () => {
+    applyGlassBackdrop();
+    if (state.lastPreview) renderReadout(state.lastPreview.summary);
+  });
   $("glass-color").addEventListener("input", () => {
     $("glass-on").checked = true;
     applyGlassBackdrop();

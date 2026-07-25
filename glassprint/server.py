@@ -163,6 +163,8 @@ def _build_spec(payload: dict[str, Any]) -> ComposeSpec:
             per_element=bool(fade_data.get("per_element")),
             dissolve=_float(fade_data.get("dissolve"), 0.0),
             seed=int(_float(fade_data.get("seed"), 0.0)),
+            halftone_mm=_float(fade_data.get("halftone_mm"), 0.0),
+            halftone_angle=_float(fade_data.get("halftone_angle"), 45.0),
             invert=bool(fade_data.get("invert")),
             cutoff=_float(fade_data.get("cutoff"), 0.0),
         ),

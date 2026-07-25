@@ -9,12 +9,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace as dataclass_replace
 
 import numpy as np
+from scipy import ndimage
 
 from . import fade as fade_module
 from . import masks, nl, pattern, recolor, segment
 from .fade import Fade
 from .pattern import Box, PatternInfo, Placement
-from .raster import Raster
+from .raster import MM_PER_INCH, Raster
 from .recolor import ColorSpec
 from .segment import Backends, MaskPlan
 
@@ -237,11 +238,21 @@ def compose(
         opacity_field = fade_module.ramp(
             spec.fade, (base.height, base.width), box, shaped
         )
+        if spec.fade.screened:
+            opacity_field, screen_notes = _screen(opacity_field, base, spec)
+            notes.extend(screen_notes)
         scope, scope_note = _fade_scope(overlay, cutout, base, box, spec, info, backends)
         if scope_note:
             notes.append(scope_note)
+        # A dot screen is its own way of expressing the ramp, so the
+        # element-level ones stand down rather than averaging the dots away.
+        element_spec = (
+            dataclass_replace(spec.fade, per_element=False, dissolve=0.0)
+            if spec.fade.screened
+            else spec.fade
+        )
         layer_alpha, faded_elements = fade_module.apply(
-            layer_alpha, opacity_field, spec.fade, scope
+            layer_alpha, opacity_field, element_spec, scope
         )
 
     if spec.clip_to_shape:
@@ -279,14 +290,52 @@ def _faintest_ink(
     """The thinnest ink laid down, ignoring anti-aliased edges.
 
     Only pixels that were solid in the artwork *and* well inside the target
-    shape count, so the number reflects the fade rather than the unavoidable
-    soft pixel at the edge of every curve.
+    shape count. The printed area is then eroded, because every edge — a curve
+    in the artwork, the rim of a halftone dot — carries a soft pixel or two
+    that would otherwise report as near-zero ink on an image that is in fact
+    printing at full strength everywhere.
     """
     solid = placed[:, :, 3] > 242
     if shaped is not None:
         solid = solid & (shaped > 0.95)
-    printed = layer_alpha[solid & (layer_alpha > 0.002)]
-    return round(float(printed.min()), 3) if printed.size else 0.0
+
+    printed = solid & (layer_alpha > 0.002)
+    if not printed.any():
+        return 0.0
+
+    interior = ndimage.binary_erosion(printed, iterations=2)
+    values = layer_alpha[interior if interior.any() else printed]
+    if not values.size:
+        return 0.0
+
+    # A low percentile rather than the outright minimum: a genuinely faint
+    # region covers area, while a stray dim pixel — the dimple left where four
+    # halftone dots meet, say — is far too small to print as anything.
+    return round(float(np.percentile(values, 1.0)), 3)
+
+
+def _screen(
+    opacity_field: np.ndarray, base: Raster, spec: ComposeSpec
+) -> tuple[np.ndarray, list[str]]:
+    """Turn the ramp into a dot screen, warning if the pitch is too fine."""
+    notes: list[str] = []
+    dpi = base.effective_dpi[0]
+    pitch_px = spec.fade.halftone_mm / MM_PER_INCH * dpi
+
+    if spec.fade.halftone_mm < 0.8:
+        notes.append(
+            f"A {spec.fade.halftone_mm:g}mm dot screen is fine enough to beat against the "
+            "printer's own halftone and moiré. Coarse dots read as a deliberate "
+            "texture — 1mm and up is the safe range."
+        )
+    if spec.fade.per_element or spec.fade.dissolve > 0:
+        notes.append(
+            "The dot screen and the per-element controls are two ways of expressing the "
+            "same fade, so the screen was used and dissolve left off."
+        )
+
+    screened = fade_module.halftone(opacity_field, pitch_px, spec.fade.halftone_angle)
+    return screened, notes
 
 
 def _fade_scope(

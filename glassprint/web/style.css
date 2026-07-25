@@ -147,6 +147,7 @@ button.ghost:hover { color: var(--text); border-color: var(--accent); }
 .glass-toggle { gap: 6px; white-space: nowrap; }
 .glass-toggle input[type="color"] { width: 26px; height: 22px; }
 .viewport.on-glass { background-image: none; }
+#ink-mode { width: auto; padding: 4px 7px; font-size: 12px; }
 
 /* --- stage --- */
 .stage { display: flex; flex-direction: column; min-width: 0; }

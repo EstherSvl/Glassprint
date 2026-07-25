@@ -266,6 +266,19 @@
           <span class="hint">0 thins every element. 1 drops elements whole and keeps
             the survivors solid — the safest option for printing.</span>
         </label>
+        <div class="row">
+          <label class="field">
+            <span>Dot screen <em id="fade-halftone-value">off</em></span>
+            <input type="range" id="fade-halftone" min="0" max="6" step="0.25" value="0" />
+          </label>
+          <label class="field">
+            <span>Screen angle <em id="fade-halftone-angle-value">45°</em></span>
+            <input type="range" id="fade-halftone-angle" min="0" max="90" step="5" value="45" />
+          </label>
+        </div>
+        <p class="hint">Manga screentone: tone from dot size, every dot full-strength ink.
+          Gradates solid areas that dissolve cannot touch. Stay at 1&nbsp;mm or coarser —
+          finer than that beats against the printer's own halftone.</p>
         <details>
           <summary>Fine adjustments</summary>
           <div class="row">
@@ -378,6 +391,10 @@
           <span>On glass</span>
           <input type="color" id="glass-color" value="#cfdad6" title="Glass colour" />
         </label>
+        <select id="ink-mode" title="How the ink sits on the glass">
+          <option value="white">White base</option>
+          <option value="none">No white base</option>
+        </select>
         <button type="button" class="ghost" id="refresh">Refresh preview</button>
       </div>
     </div>

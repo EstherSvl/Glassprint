@@ -70,6 +70,14 @@ class Fade:
     #: Keeps the dissolve reproducible between preview and export.
     seed: int = 0
 
+    #: Render the ramp as a dot screen instead, at this pitch in millimetres.
+    #: 0 turns it off. Keep it coarse — see :func:`halftone`.
+    halftone_mm: float = 0.0
+
+    #: Screen angle. 45 is the traditional choice; it is the least obtrusive
+    #: to the eye and avoids lining the dots up with the artwork's own edges.
+    halftone_angle: float = 45.0
+
     #: Flip the direction of the ramp.
     invert: bool = False
 
@@ -88,6 +96,10 @@ class Fade:
     def active(self) -> bool:
         return self.mode != "none"
 
+    @property
+    def screened(self) -> bool:
+        return self.halftone_mm > 0
+
     def describe(self) -> str:
         if not self.active:
             return "none"
@@ -99,7 +111,9 @@ class Fade:
         parts.append(f"{self.start:g}–{self.end:g}")
         if self.curve != 1.0:
             parts.append(f"curve {self.curve:g}")
-        if self.dissolve > 0:
+        if self.screened:
+            parts.append(f"{self.halftone_mm:g}mm dots at {self.halftone_angle:g}°")
+        elif self.dissolve > 0:
             parts.append(f"{self.dissolve:.0%} dissolve")
         elif self.per_element:
             parts.append("per element")
@@ -196,6 +210,68 @@ def _shape_travel(shape_mask: np.ndarray | None, width: int, height: int) -> np.
     if deepest < 1e-6:
         return np.ones((height, width), dtype=np.float32)
     return np.clip(1.0 - distance / deepest, 0.0, 1.0).astype(np.float32)
+
+
+#: Coverage at which neighbouring dots first touch (a circle inscribed in its
+#: cell covers pi/4 of it). Past this they overlap and the area maths changes.
+_DOTS_TOUCH = math.pi / 4.0
+
+
+def halftone(
+    opacity: np.ndarray,
+    pitch_px: float,
+    angle: float = 45.0,
+    softness: float = 0.8,
+) -> np.ndarray:
+    """Render an opacity ramp as a screen of round dots, manga style.
+
+    Tone comes from dot *size*, so every dot is full-strength ink and nothing
+    is laid down at a density the printer cannot hold — the same reason
+    screentone worked with nothing but black ink.
+
+    Keep the pitch coarse. The printer halftones too, at device resolution, and
+    a fine screen here beats against that one and produces moiré. At 1-3mm a
+    dot is hundreds of device pixels across, so there is nothing to interfere
+    with and the dots read as a deliberate texture.
+    """
+    pitch = max(2.0, float(pitch_px))
+    height, width = opacity.shape
+
+    radians = math.radians(angle)
+    cos, sin = math.cos(radians), math.sin(radians)
+    xs = np.arange(width, dtype=np.float32)
+    ys = np.arange(height, dtype=np.float32)[:, None]
+
+    # Rotate into screen space, then find each pixel's offset from its own
+    # cell centre.
+    u = (xs * cos + ys * sin) / pitch
+    v = (-xs * sin + ys * cos) / pitch
+    du = (u % 1.0) - 0.5
+    dv = (v % 1.0) - 0.5
+    distance = np.sqrt(du * du + dv * dv) * pitch
+
+    coverage = np.clip(opacity, 0.0, 1.0)
+    radius = _dot_radius(coverage, pitch)
+    screen = np.clip((radius - distance) / max(softness, 1e-3) + 0.5, 0.0, 1.0)
+
+    # The anti-aliasing ramp straddles the dot edge, which at the extremes
+    # leaves a half-lit pixel at each cell centre (empty) or corner (solid).
+    # Pin the ends so "no ink" and "solid" are exactly that.
+    screen = np.where(coverage <= 0.0, 0.0, screen)
+    screen = np.where(coverage >= 1.0, 1.0, screen)
+    return screen.astype(np.float32)
+
+
+def _dot_radius(coverage: np.ndarray, pitch: float) -> np.ndarray:
+    """Dot radius that puts ``coverage`` of each cell under ink.
+
+    Area-faithful while the dots stand apart; past the point where they touch
+    it ramps to the cell's half-diagonal so full coverage really is solid.
+    """
+    apart = pitch * np.sqrt(coverage / math.pi)
+    merged_span = (coverage - _DOTS_TOUCH) / (1.0 - _DOTS_TOUCH)
+    merged = pitch * (0.5 + np.clip(merged_span, 0.0, 1.0) * (math.sqrt(0.5) - 0.5))
+    return np.where(coverage <= _DOTS_TOUCH, apart, merged).astype(np.float32)
 
 
 def apply(
