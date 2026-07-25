@@ -11,6 +11,8 @@ import base64
 import io
 import json
 import re
+import shutil
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -158,3 +160,40 @@ def test_bundling_keeps_files_in_their_own_folder():
     data = bundle([{"file": "a.png", "data": b"one"}, {"file": "b.png", "data": b"two"}], "job")
     names = zipfile.ZipFile(io.BytesIO(data)).namelist()
     assert names == ["job/a.png", "job/b.png"]
+
+
+def test_the_pages_javascript_actually_parses(built, tmp_path):
+    """The build assembles JavaScript inside Python strings.
+
+    Python reads escapes first given half a chance: a `\\n` meant for the
+    browser becomes a real newline, `\\b` becomes a backspace, and the result is
+    a page that fails to parse with nothing on screen to say why. Every test
+    here passed while the build was doing exactly that.
+    """
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    # Control characters have no business in source and are the fingerprint of
+    # an escape Python ate on the way through.
+    stray = {ch for ch in built if ord(ch) < 32 and ch not in "\n\r\t"}
+    assert not stray, f"mangled escape produced {stray!r}"
+
+    scripts = re.findall(r"<script>(.*?)</script>", built, re.S)
+    assert scripts, "no scripts in the build"
+    for index, source in enumerate(scripts):
+        path = tmp_path / f"chunk{index}.js"
+        path.write_text(source, encoding="utf-8")
+        done = subprocess.run([node, "--check", str(path)], capture_output=True, text=True)
+        assert done.returncode == 0, f"script {index} does not parse:\n{done.stderr}"
+
+
+def test_the_worker_javascript_actually_parses(worker_source, tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    path = tmp_path / "worker.js"
+    path.write_text(worker_source, encoding="utf-8")
+    done = subprocess.run([node, "--check", str(path)], capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr

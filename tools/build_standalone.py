@@ -27,45 +27,71 @@ WEB = ROOT / "glassprint" / "web"
 PACKAGE = ROOT / "glassprint"
 OUTPUT = ROOT / "docs" / "index.html"
 
+# The JavaScript below is a raw string on purpose. Python would otherwise read
+# the escapes meant for the browser — turning \n into a real newline and \b
+# into a backspace, which silently emits a page that cannot parse.
+
 # cli.py wants typer and server.py wants fastapi; neither exists in the browser
 # and nothing the page calls imports them.
 SKIP = {"cli.py", "server.py"}
 
-BOOT = """
+BOOT = r"""
 /* Start Python, then hand the page over to app.js.
  *
- * This takes minutes on a tablet the first time, so the wait reports what it
- * is doing, how much has arrived and how long it has been going. Without a
- * clock that visibly moves there is no way to tell a slow connection from a
- * dead one, and the honest answer is usually "slow". */
+ * Every step is timed and left on screen. On a tablet there is no console to
+ * open when something goes wrong, so the page has to be able to say for itself
+ * what finished, how long each part took, and exactly where it stopped — a
+ * single glance has to be a usable bug report. */
 (function () {
   const backend = window.GlassprintBackends.PyodideBackend;
   window.GlassprintBackend = backend;
 
   const splash = document.getElementById("boot");
   const note = document.getElementById("boot-note");
+  const list = document.getElementById("boot-steps");
+  const stuck = document.getElementById("boot-stuck");
 
-  const started = Date.now();
-  let stage = "starting";
-  let bytes = 0;
+  const steps = [];
+  const SLOW = 45000;
 
   function paint() {
-    const seconds = Math.round((Date.now() - started) / 1000);
-    const clock =
-      seconds < 60 ? seconds + "s" : Math.floor(seconds / 60) + "m " + (seconds % 60) + "s";
-    const arrived = bytes ? " · " + (bytes / 1048576).toFixed(1) + " MB" : "";
-    note.textContent = stage + arrived + " · " + clock;
+    const now = Date.now();
+    list.innerHTML = steps
+      .map((step) => {
+        const seconds = ((step.until || now) - step.at) / 1000;
+        const size = step.bytes ? " · " + (step.bytes / 1048576).toFixed(1) + " MB" : "";
+        const clock = seconds < 10 ? seconds.toFixed(1) : Math.round(seconds);
+        return (
+          "<li class='" + (step.until ? "done" : "live") + "'>" +
+          step.text + size + " · " + clock + "s</li>"
+        );
+      })
+      .join("");
+
+    const active = steps[steps.length - 1];
+    if (active && !active.until && now - active.at > SLOW) {
+      stuck.hidden = false;
+      stuck.innerHTML =
+        "<strong>This step is taking far longer than it should.</strong><br />" +
+        "Reloading is safe and quick — whatever has downloaded already is kept.";
+    }
   }
 
-  const ticking = setInterval(paint, 1000);
   backend.onProgress = (text) => {
-    stage = text;
+    const now = Date.now();
+    const previous = steps[steps.length - 1];
+    if (previous) previous.until = now;
+    steps.push({ text: text, at: now });
     paint();
   };
-  // Bytes land in bursts; the once-a-second repaint is what shows them.
+  // Bytes land in bursts; the repaint on the interval is what shows them.
   backend.onBytes = (count) => {
-    bytes = count;
+    const active = steps[steps.length - 1];
+    if (active) active.bytes = count;
   };
+
+  const ticking = setInterval(paint, 500);
+  note.textContent = "Starting up";
   paint();
 
   backend
@@ -77,19 +103,21 @@ BOOT = """
     })
     .catch((error) => {
       clearInterval(ticking);
+      const last = steps[steps.length - 1];
+      if (last && !last.until) last.until = Date.now();
+      paint();
       // Python tracebacks arrive here in full. Neither end of one is the useful
       // part: the first line is always "Traceback (most recent call last):",
       // and the last is often a link to further reading. Prefer the line that
       // actually names the exception.
-      const lines = String(error.message).split("\\n").filter((line) => line.trim());
-      const named = lines.filter((line) => /^[A-Za-z_.]*(Error|Exception)\\b/.test(line.trim()));
+      const lines = String(error.message).split("\n").filter((line) => line.trim());
+      const named = lines.filter((line) => /^[A-Za-z_.]*(Error|Exception)\b/.test(line.trim()));
       const blame = named[named.length - 1] || lines[lines.length - 1] || "unknown error";
-      note.innerHTML =
-        "<strong>Could not start.</strong><br />" +
-        blame.slice(0, 200) +
-        "<br /><span class='hint'>This page needs to be online the first time " +
-        "it runs, and needs to be served over https rather than opened straight " +
-        "from a file.</span>";
+      note.innerHTML = "<strong>Could not start.</strong><br />" + blame.slice(0, 200);
+      stuck.hidden = false;
+      stuck.innerHTML =
+        "<span class='hint'>This page needs to be online the first time it runs, " +
+        "and needs to be served over https rather than opened straight from a file.</span>";
     });
 })();
 """
@@ -99,6 +127,8 @@ SPLASH = """
   <div class="boot-card">
     <h1>glassprint</h1>
     <p id="boot-note">starting…</p>
+    <ol id="boot-steps" class="boot-steps"></ol>
+    <p id="boot-stuck" class="boot-stuck" hidden></p>
     <p class="hint">
       The first visit downloads Python and its imaging libraries — roughly
       50&nbsp;MB, most of it scipy. On a tablet that is a few minutes, and the
@@ -125,6 +155,20 @@ SPLASH_CSS = """
 .boot-card { max-width: 30rem; text-align: center; }
 .boot-card h1 { font-size: 2rem; margin: 0 0 0.5rem; }
 .boot-card p { margin: 0.5rem 0; }
+.boot-steps {
+  list-style: none;
+  margin: 1rem auto;
+  padding: 0;
+  font-size: 0.85rem;
+  text-align: left;
+  display: inline-block;
+  min-width: 18rem;
+}
+.boot-steps li { padding: 2px 0; color: var(--accent, #c9a227); }
+.boot-steps li.done { color: var(--muted, #8b929c); }
+.boot-steps li.done::before { content: "✓ "; }
+.boot-steps li:not(.done)::before { content: "… "; }
+.boot-stuck { color: var(--accent, #c9a227); }
 """
 
 
