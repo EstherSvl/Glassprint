@@ -197,3 +197,15 @@ def test_the_worker_javascript_actually_parses(worker_source, tmp_path):
     path.write_text(worker_source, encoding="utf-8")
     done = subprocess.run([node, "--check", str(path)], capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
+
+
+def test_the_hidden_attribute_actually_hides(built):
+    """The browser's own [hidden] rule loses to any author rule setting display.
+
+    Several here set it, so hiding an element from script did nothing at all:
+    the splash sat over a tool that had already finished starting, and the
+    folder field showed in a build that has no folders to write to.
+    """
+    assert re.search(r"\[hidden\][^{]*\{[^}]*display:\s*none\s*!important", built), (
+        "nothing in the stylesheet makes the hidden attribute stick"
+    )
