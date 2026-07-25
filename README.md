@@ -19,6 +19,7 @@ on the optional Claude integration.
 ## Install
 
 ```bash
+git clone https://github.com/EstherSvl/glassprint.git
 cd glassprint
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
@@ -71,9 +72,15 @@ first run installs everything, and every run after that just starts the server
 and prints the address.
 
 **If there is no computer involved**, use the single-file build:
-`dist/glassprint.html`. It carries the whole tool inside it and runs Python in
-the browser tab, so the iPad does the work itself. Put it anywhere that serves
-files over `https` — GitHub Pages, a folder on your own site — and open the URL.
+`docs/index.html`. It carries the whole tool inside it and runs Python in
+the browser tab, so the iPad does the work itself.
+
+It needs to be served over `https`. The shortest way is GitHub Pages: in this
+repository, **Settings → Pages**, set the source to the `main` branch and the
+`/docs` folder, and save. A minute later the tool is at
+`https://esthersvl.github.io/glassprint/` — bookmark that on the iPad and add it
+to the home screen. Any other https host works the same way; the file has no
+server side to it.
 
 The first visit downloads the Python runtime and its imaging libraries, around
 40 MB, which the browser then keeps. After that it works with no network at all.
@@ -569,7 +576,7 @@ The layout:
 is an image and some settings" and "here are the pictures and files" lives
 there, so `server.py` is a thin HTTP shell over it and the tablet calls the very
 same code with no server at all. `tools/build_standalone.py` folds the page and
-the package into `dist/glassprint.html`.
+the package into `docs/index.html`.
 
 The one thing the test suite cannot reach is the browser build actually running
 numpy, scipy and Pillow under WebAssembly — that needs a real download of the

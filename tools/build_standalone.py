@@ -7,8 +7,10 @@ Python in the browser tab instead.
 
     python tools/build_standalone.py
 
-Writes ``dist/glassprint.html``. Host that file anywhere that serves it over
-https — GitHub Pages, iCloud, your own site — and open it on the tablet.
+Writes ``docs/index.html``. That path is not an accident: GitHub Pages offers
+to publish a folder called ``docs``, so switching Pages on in the repository
+settings puts this page straight onto the web with nothing else to configure.
+Any other https host works just as well.
 
 The output is committed to the repository, and ``tests/test_standalone.py``
 rebuilds it to check it has not drifted from the sources.
@@ -23,7 +25,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "glassprint" / "web"
 PACKAGE = ROOT / "glassprint"
-OUTPUT = ROOT / "dist" / "glassprint.html"
+OUTPUT = ROOT / "docs" / "index.html"
 
 # cli.py wants typer and server.py wants fastapi; neither exists in the browser
 # and nothing the page calls imports them.

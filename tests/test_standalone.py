@@ -1,6 +1,6 @@
 """The single-file browser build.
 
-``dist/glassprint.html`` is committed so it can be hosted without a build step,
+``docs/index.html`` is committed so it can be hosted without a build step,
 which means it can quietly fall behind the sources it was built from. These
 tests rebuild it and compare.
 """
@@ -35,7 +35,7 @@ def test_the_committed_build_matches_the_sources(built):
     committed = build_standalone.OUTPUT
     assert committed.exists(), "run: python tools/build_standalone.py"
     assert committed.read_text(encoding="utf-8") == built, (
-        "dist/glassprint.html is out of date — run python tools/build_standalone.py"
+        "docs/index.html is out of date — run python tools/build_standalone.py"
     )
 
 
