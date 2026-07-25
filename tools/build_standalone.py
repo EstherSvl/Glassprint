@@ -34,32 +34,59 @@ SKIP = {"cli.py", "server.py"}
 BOOT = """
 /* Start Python, then hand the page over to app.js.
  *
- * The runtime is a few tens of megabytes on first visit and cached by the
- * browser afterwards, so the wait is announced rather than hidden. */
+ * This takes minutes on a tablet the first time, so the wait reports what it
+ * is doing, how much has arrived and how long it has been going. Without a
+ * clock that visibly moves there is no way to tell a slow connection from a
+ * dead one, and the honest answer is usually "slow". */
 (function () {
   const backend = window.GlassprintBackends.PyodideBackend;
   window.GlassprintBackend = backend;
 
   const splash = document.getElementById("boot");
   const note = document.getElementById("boot-note");
+
+  const started = Date.now();
+  let stage = "starting";
+  let bytes = 0;
+
+  function paint() {
+    const seconds = Math.round((Date.now() - started) / 1000);
+    const clock =
+      seconds < 60 ? seconds + "s" : Math.floor(seconds / 60) + "m " + (seconds % 60) + "s";
+    const arrived = bytes ? " · " + (bytes / 1048576).toFixed(1) + " MB" : "";
+    note.textContent = stage + arrived + " · " + clock;
+  }
+
+  const ticking = setInterval(paint, 1000);
   backend.onProgress = (text) => {
-    note.textContent = text;
+    stage = text;
+    paint();
   };
+  // Bytes land in bursts; the once-a-second repaint is what shows them.
+  backend.onBytes = (count) => {
+    bytes = count;
+  };
+  paint();
 
   backend
     .start(window.GLASSPRINT_PYTHON)
     .then(() => {
+      clearInterval(ticking);
       splash.hidden = true;
       window.glassprintInit();
     })
     .catch((error) => {
-      // Python tracebacks arrive here in full. The line that names the problem
-      // is the last one, not the first — "Traceback (most recent call last):"
-      // tells nobody anything.
+      clearInterval(ticking);
+      // Python tracebacks arrive here in full. Neither end of one is the useful
+      // part: the first line is always "Traceback (most recent call last):",
+      // and the last is often a link to further reading. Prefer the line that
+      // actually names the exception.
       const lines = String(error.message).split("\\n").filter((line) => line.trim());
+      const named = lines.filter((line) => /^[A-Za-z_.]*(Error|Exception)\\b/.test(line.trim()));
+      const blame = named[named.length - 1] || lines[lines.length - 1] || "unknown error";
       note.innerHTML =
         "<strong>Could not start.</strong><br />" +
-        (lines[lines.length - 1] || "unknown error").slice(0, 200) +
+        blame.slice(0, 200) +
         "<br /><span class='hint'>This page needs to be online the first time " +
         "it runs, and needs to be served over https rather than opened straight " +
         "from a file.</span>";
@@ -73,10 +100,13 @@ SPLASH = """
     <h1>glassprint</h1>
     <p id="boot-note">starting…</p>
     <p class="hint">
-      The first visit downloads Python and its imaging libraries — around 40&nbsp;MB,
-      once. After that this page works with no network at all, and no image ever
-      leaves the tablet.
+      The first visit downloads Python and its imaging libraries — roughly
+      50&nbsp;MB, most of it scipy. On a tablet that is a few minutes, and the
+      last stretch is compiling rather than downloading, so the megabytes stop
+      moving before it is finished. The browser keeps it all afterwards and
+      later visits start in seconds.
     </p>
+    <p class="hint">No image ever leaves the tablet.</p>
   </div>
 </div>
 """

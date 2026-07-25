@@ -66,6 +66,7 @@ const PyodideBackend = {
   name: "pyodide",
   pyodide: null,
   onProgress: () => {},
+  onBytes: () => {},
 
   /* Pyodide is tens of megabytes, so this is deliberately explicit rather than
    * hidden behind the first preview. The caller reports progress to the page. */
@@ -80,8 +81,21 @@ const PyodideBackend = {
     const pyodide = this.pyodide || (await loadPyodide({ indexURL: base }));
     this.pyodide = pyodide;
 
-    this.onProgress("fetching numpy, scipy and Pillow…");
-    await pyodide.loadPackage(["numpy", "scipy", "pillow"]);
+    // scipy is far and away the biggest of the three, and it is downloaded and
+    // then compiled, so this is the part that feels like nothing is happening.
+    this.onProgress("fetching numpy, scipy and Pillow");
+    const untrack = trackWheelDownloads((bytes) => this.onBytes(bytes));
+    try {
+      await pyodide.loadPackage(["numpy", "scipy", "pillow"], {
+        messageCallback: (text) => {
+          // Pyodide says "Loading …" as they start and "Loaded …" once they
+          // are downloaded and being installed — the second half of the wait.
+          if (/^Loaded/.test(text)) this.onProgress("unpacking and compiling scipy");
+        },
+      });
+    } finally {
+      untrack();
+    }
     // loadPackage reports a failed download to the console and carries on, so
     // check for ourselves — otherwise the first symptom is an unreadable
     // traceback several steps later.
@@ -160,6 +174,57 @@ const PyodideBackend = {
 
 /* ------------------------------------------------------------------ helpers */
 
+/* Count the bytes as the libraries arrive, so a slow download looks different
+ * from a stuck one.
+ *
+ * Only the wheels are tracked. They are read as array buffers, so handing back
+ * a re-streamed Response is harmless — whereas doing the same to the runtime's
+ * own .wasm would break streaming compilation. If any of this is unsupported,
+ * the original fetch is left alone: a missing byte count is a small loss, a
+ * broken download is a total one.
+ */
+function trackWheelDownloads(report) {
+  const original = window.fetch;
+  try {
+    new Response(new ReadableStream());
+  } catch {
+    return () => {};
+  }
+
+  let total = 0;
+  window.fetch = async (input, init) => {
+    const response = await original(input, init);
+    const url = typeof input === "string" ? input : (input && input.url) || "";
+    if (!url.endsWith(".whl") || !response.body) return response;
+
+    try {
+      const reader = response.body.getReader();
+      const counted = new ReadableStream({
+        async pull(controller) {
+          const { done, value } = await reader.read();
+          if (done) {
+            controller.close();
+            return;
+          }
+          total += value.byteLength;
+          report(total);
+          controller.enqueue(value);
+        },
+        cancel(reason) {
+          return reader.cancel(reason);
+        },
+      });
+      return new Response(counted, { headers: response.headers, status: response.status });
+    } catch {
+      return response;
+    }
+  };
+
+  return () => {
+    window.fetch = original;
+  };
+}
+
 function abortError() {
   const error = new Error("superseded");
   error.name = "AbortError";
@@ -194,4 +259,10 @@ function base64ToBytes(text) {
   return bytes;
 }
 
-window.GlassprintBackends = { HttpBackend, PyodideBackend, bytesToBase64, base64ToBytes };
+window.GlassprintBackends = {
+  HttpBackend,
+  PyodideBackend,
+  trackWheelDownloads,
+  bytesToBase64,
+  base64ToBytes,
+};

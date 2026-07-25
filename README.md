@@ -104,8 +104,13 @@ repository, **Settings → Pages**, set the source to the `main` branch and the
 to the home screen. Any other https host works the same way; the file has no
 server side to it.
 
-The first visit downloads the Python runtime and its imaging libraries, around
-40 MB, which the browser then keeps. After that it works with no network at all.
+The first visit downloads the Python runtime and its imaging libraries — roughly
+50 MB, about two thirds of which is scipy — and then compiles them. On a tablet
+that is a few minutes, and the megabytes stop moving before it is done, because
+the last stretch is compilation rather than download. The splash reports the
+stage, the megabytes and a running clock, so a slow start looks different from a
+stuck one. The browser keeps all of it, and later visits start in seconds.
+
 It has to be *served*, though: opening the file directly from the Files app does
 not reliably work, because browsers refuse to load a runtime into a page that
 came from the filesystem.
