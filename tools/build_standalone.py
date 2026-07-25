@@ -142,6 +142,9 @@ def build() -> str:
     style = (WEB / "style.css").read_text(encoding="utf-8")
     backend = (WEB / "backend.js").read_text(encoding="utf-8")
     app = (WEB / "app.js").read_text(encoding="utf-8")
+    # Carried as a string, not a script tag: the page builds its worker from a
+    # blob so that this stays one file with nothing beside it.
+    worker = (WEB / "worker.js").read_text(encoding="utf-8")
 
     sources = python_sources()
     if "bridge.py" not in sources:
@@ -158,6 +161,7 @@ def build() -> str:
             [
                 "<script>",
                 f"window.GLASSPRINT_PYTHON = {json.dumps(sources)};",
+                f"window.GLASSPRINT_WORKER = {json.dumps(worker)};",
                 "</script>",
                 f"<script>\n{backend}\n</script>",
                 f"<script>\n{app}\n</script>",

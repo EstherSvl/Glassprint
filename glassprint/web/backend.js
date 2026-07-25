@@ -64,79 +64,80 @@ const PYODIDE_URL = "https://cdn.jsdelivr.net/pyodide/v0.28.3/full/";
 
 const PyodideBackend = {
   name: "pyodide",
-  pyodide: null,
+  worker: null,
+  ready: false,
   onProgress: () => {},
   onBytes: () => {},
+  pending: new Map(),
+  nextId: 1,
 
   /* Pyodide is tens of megabytes, so this is deliberately explicit rather than
-   * hidden behind the first preview. The caller reports progress to the page. */
-  async start(sources) {
-    if (this.handle) return this.pyodide;
+   * hidden behind the first preview. It runs in a worker: see web/worker.js
+   * for why. */
+  start(sources) {
+    if (this.ready) return Promise.resolve();
 
-    this.onProgress("fetching Python…");
-    const base = window.GLASSPRINT_PYODIDE_URL || PYODIDE_URL;
-    if (!window.loadPyodide) await loadScript(base + "pyodide.js");
-    // Published before the rest of the setup, so a retry after a failed step
-    // reuses the runtime instead of downloading it again.
-    const pyodide = this.pyodide || (await loadPyodide({ indexURL: base }));
-    this.pyodide = pyodide;
+    const source = window.GLASSPRINT_WORKER;
+    if (!source) return Promise.reject(new Error("this build is missing its worker script"));
 
-    // scipy is far and away the biggest of the three, and it is downloaded and
-    // then compiled, so this is the part that feels like nothing is happening.
-    this.onProgress("fetching numpy, scipy and Pillow");
-    const untrack = trackWheelDownloads((bytes) => this.onBytes(bytes));
-    try {
-      await pyodide.loadPackage(["numpy", "scipy", "pillow"], {
-        messageCallback: (text) => {
-          // Pyodide says "Loading …" as they start and "Loaded …" once they
-          // are downloaded and being installed — the second half of the wait.
-          if (/^Loaded/.test(text)) this.onProgress("unpacking and compiling scipy");
-        },
-      });
-    } finally {
-      untrack();
-    }
-    // loadPackage reports a failed download to the console and carries on, so
-    // check for ourselves — otherwise the first symptom is an unreadable
-    // traceback several steps later.
-    //
-    // Ask Python whether the imports work rather than inspecting
-    // loadedPackages: that is keyed by each package's display name, which is
-    // "Pillow" where the request was "pillow", so comparing names invents
-    // failures that did not happen.
-    try {
-      pyodide.runPython("import numpy, scipy.ndimage, PIL.Image, PIL.ImageFilter");
-    } catch (error) {
-      throw new Error("the imaging libraries did not load — check the connection and reload");
-    }
+    // Built from a blob so the single-file page stays a single file, and a
+    // module worker because Pyodide ships as an ES module.
+    const worker = new Worker(
+      URL.createObjectURL(new Blob([source], { type: "text/javascript" })),
+      { type: "module" }
+    );
+    this.worker = worker;
 
-    this.onProgress("unpacking glassprint…");
-    const root = "/lib/glassprint-src";
-    pyodide.FS.mkdirTree(root + "/glassprint");
-    for (const [name, source] of Object.entries(sources)) {
-      pyodide.FS.writeFile(`${root}/glassprint/${name}`, source);
-    }
-    // Ahead of site-packages, so a stale copy can never win.
-    pyodide.runPython(`import sys; sys.path.insert(0, ${JSON.stringify(root)})`);
+    const started = new Promise((resolve, reject) => {
+      worker.onmessage = (event) => {
+        const message = event.data || {};
+        if (message.type === "stage") {
+          this.onProgress(message.text);
+        } else if (message.type === "bytes") {
+          this.onBytes(message.total);
+        } else if (message.type === "ready") {
+          this.ready = true;
+          resolve();
+        } else if (message.type === "error") {
+          reject(new Error(message.message));
+        } else if (message.type === "result") {
+          const settle = this.pending.get(message.id);
+          if (settle) {
+            this.pending.delete(message.id);
+            settle(message.json);
+          }
+        }
+      };
+      worker.onerror = (event) =>
+        reject(new Error(event.message || "the worker could not start"));
+    });
 
-    this.onProgress("starting up…");
-    this.handle = pyodide.runPython("from glassprint.bridge import handle; handle");
-    return pyodide;
+    worker.postMessage({
+      type: "boot",
+      pyodideUrl: window.GLASSPRINT_PYODIDE_URL || PYODIDE_URL,
+      sources,
+    });
+    return started;
   },
 
-  /* Every call crosses as a JSON string in both directions. Pyodide can pass
-   * richer objects, but they need explicit destruction to avoid leaking, and
-   * text keeps this backend interchangeable with the HTTP one. */
   call(method, payload) {
-    if (!this.handle) throw new Error("Python is still starting up.");
-    const raw = this.handle(method, JSON.stringify(payload || {}));
-    const data = JSON.parse(raw);
-    if (data.error) throw new Error(data.error);
-    return data.ok;
+    return new Promise((resolve, reject) => {
+      if (!this.ready) {
+        reject(new Error("Python is still starting up."));
+        return;
+      }
+      const id = this.nextId++;
+      this.pending.set(id, (json) => {
+        const data = JSON.parse(json);
+        if (data.error) reject(new Error(data.error));
+        else resolve(data.ok);
+      });
+      this.worker.postMessage({ type: "call", id, method, payload: payload || {} });
+    });
   },
 
   async capabilities() {
-    return { ...this.call("capabilities"), writes_files: false };
+    return { ...(await this.call("capabilities")), writes_files: false };
   },
 
   async upload(file, role) {
@@ -149,19 +150,19 @@ const PyodideBackend = {
   },
 
   async preview(spec, signal) {
-    // Python here is synchronous and holds the one thread the page has, so a
-    // superseded preview cannot be cancelled mid-render — only skipped.
+    // The worker renders one at a time. A superseded preview cannot be pulled
+    // back, but its result can be dropped rather than painted over a newer one.
     if (signal && signal.aborted) throw abortError();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    const data = await this.call("preview", spec);
     if (signal && signal.aborted) throw abortError();
-    return this.call("preview", spec);
+    return data;
   },
 
   async export(payload) {
     // No filesystem to write to: everything comes back as one zip the browser
     // hands to the Files app.
     const request = { ...payload, export: { ...payload.export, bundle: true } };
-    const data = this.call("export", request);
+    const data = await this.call("export", request);
     const zip = data.bundle;
     const blob = new Blob([base64ToBytes(zip.data)], { type: "application/zip" });
     return {
@@ -174,71 +175,10 @@ const PyodideBackend = {
 
 /* ------------------------------------------------------------------ helpers */
 
-/* Count the bytes as the libraries arrive, so a slow download looks different
- * from a stuck one.
- *
- * Only the wheels are tracked. They are read as array buffers, so handing back
- * a re-streamed Response is harmless — whereas doing the same to the runtime's
- * own .wasm would break streaming compilation. If any of this is unsupported,
- * the original fetch is left alone: a missing byte count is a small loss, a
- * broken download is a total one.
- */
-function trackWheelDownloads(report) {
-  const original = window.fetch;
-  try {
-    new Response(new ReadableStream());
-  } catch {
-    return () => {};
-  }
-
-  let total = 0;
-  window.fetch = async (input, init) => {
-    const response = await original(input, init);
-    const url = typeof input === "string" ? input : (input && input.url) || "";
-    if (!url.endsWith(".whl") || !response.body) return response;
-
-    try {
-      const reader = response.body.getReader();
-      const counted = new ReadableStream({
-        async pull(controller) {
-          const { done, value } = await reader.read();
-          if (done) {
-            controller.close();
-            return;
-          }
-          total += value.byteLength;
-          report(total);
-          controller.enqueue(value);
-        },
-        cancel(reason) {
-          return reader.cancel(reason);
-        },
-      });
-      return new Response(counted, { headers: response.headers, status: response.status });
-    } catch {
-      return response;
-    }
-  };
-
-  return () => {
-    window.fetch = original;
-  };
-}
-
 function abortError() {
   const error = new Error("superseded");
   error.name = "AbortError";
   return error;
-}
-
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    const tag = document.createElement("script");
-    tag.src = src;
-    tag.onload = resolve;
-    tag.onerror = () => reject(new Error(`could not load ${src}`));
-    document.head.appendChild(tag);
-  });
 }
 
 function bytesToBase64(bytes) {
@@ -259,10 +199,4 @@ function base64ToBytes(text) {
   return bytes;
 }
 
-window.GlassprintBackends = {
-  HttpBackend,
-  PyodideBackend,
-  trackWheelDownloads,
-  bytesToBase64,
-  base64ToBytes,
-};
+window.GlassprintBackends = { HttpBackend, PyodideBackend, bytesToBase64, base64ToBytes };

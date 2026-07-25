@@ -31,6 +31,12 @@ def built() -> str:
     return build_standalone.build()
 
 
+@pytest.fixture(scope="module")
+def worker_source(built) -> str:
+    """The worker is embedded as a JSON string, so decode before reading it."""
+    return json.loads(re.search(r"window\.GLASSPRINT_WORKER = (\".*?\");\n", built, re.S).group(1))
+
+
 def test_the_committed_build_matches_the_sources(built):
     committed = build_standalone.OUTPUT
     assert committed.exists(), "run: python tools/build_standalone.py"
@@ -49,7 +55,7 @@ def test_the_build_loads_nothing_from_a_server(built):
     assert "PyodideBackend" in built.split("window.GlassprintBackend = backend;")[0][-400:]
 
 
-def test_the_library_check_asks_python_not_the_package_names(built):
+def test_the_library_check_asks_python_not_the_package_names(built, worker_source):
     """Pyodide keys loaded packages by display name — "Pillow" for "pillow".
 
     Comparing those names invented a failure that had not happened and stopped
@@ -57,7 +63,22 @@ def test_the_library_check_asks_python_not_the_package_names(built):
     an import can answer.
     """
     assert ".loadedPackages" not in built, "back to comparing package names"
-    assert "import numpy, scipy.ndimage, PIL.Image, PIL.ImageFilter" in built
+    for module in ("numpy", "scipy.ndimage", "PIL.Image, PIL.ImageFilter"):
+        assert f'"{module}"' in worker_source
+
+
+def test_python_runs_in_a_worker_so_the_page_can_keep_painting(built, worker_source):
+    """A synchronous render on the page's own thread freezes the whole tab.
+
+    That is how a slow start became indistinguishable from a hung one: the
+    clock meant to prove it was alive could not repaint while Python ran.
+    """
+    assert "window.GLASSPRINT_WORKER" in built
+    assert "new Worker(" in built
+    # Python is only ever touched inside the worker.
+    assert "runPython" in worker_source
+    page = built.replace(json.dumps(worker_source), "")
+    assert "runPython" not in page, "the page still calls Python on its own thread"
 
 
 def test_every_module_the_bridge_imports_is_embedded(built):

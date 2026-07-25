@@ -111,6 +111,12 @@ the last stretch is compilation rather than download. The splash reports the
 stage, the megabytes and a running clock, so a slow start looks different from a
 stuck one. The browser keeps all of it, and later visits start in seconds.
 
+Python runs in a worker rather than on the page's own thread. Pyodide is
+synchronous — importing scipy, or rendering a preview, is one long call that
+cannot be interrupted — so on the main thread the whole tab stops for the
+duration: the clock freezes mid-count and sliders ignore you. Off it, the work
+takes exactly as long and the page stays alive throughout.
+
 It has to be *served*, though: opening the file directly from the Files app does
 not reliably work, because browsers refuse to load a runtime into a page that
 came from the filesystem.
