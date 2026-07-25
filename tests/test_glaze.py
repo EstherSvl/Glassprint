@@ -194,7 +194,7 @@ def test_export_writes_one_file_per_glaze_pass(tmp_path, base_shape, pattern_art
         result, tmp_path, ExportSpec(formats=["png"], targets=["glaze-layers"], basename="panel")
     )
     assert manifest
-    assert all(entry["file"].startswith("panel_glaze") for entry in manifest)
+    assert all(entry["file"].startswith("panel_pass") for entry in manifest)
     assert all(entry["alpha"] for entry in manifest)
 
     stack = result.glaze_plan.stack
@@ -237,3 +237,103 @@ def test_glaze_export_is_skipped_when_glazing_is_off(tmp_path, base_shape, patte
     result = compose(base_shape, pattern_art, ComposeSpec())
     manifest = export(result, tmp_path, ExportSpec(formats=["png"], targets=["glaze-layers"]))
     assert manifest == []
+
+
+# --- printing the passes by hand -------------------------------------------
+
+def test_passes_are_numbered_so_sorting_gives_the_print_order(tmp_path, base_shape, pattern_art):
+    result = compose(
+        base_shape, pattern_art,
+        ComposeSpec(
+            keep="remove the white background",
+            glaze=GlazeSpec(enabled=True, glass="#7d9b8f", colours=4),
+        ),
+    )
+    manifest = export(
+        result, tmp_path, ExportSpec(formats=["png"], targets=["glaze-layers"], basename="panel")
+    )
+    names = sorted(entry["file"] for entry in manifest)
+    numbers = [int(name.split("pass")[1][:2]) for name in names]
+    assert numbers == sorted(numbers) == list(range(1, len(numbers) + 1))
+
+
+def test_print_order_sheet_lists_the_passes_and_the_white_warning(tmp_path, base_shape, pattern_art):
+    result = compose(
+        base_shape, pattern_art,
+        ComposeSpec(
+            keep="remove the white background",
+            glaze=GlazeSpec(enabled=True, glass="#7d9b8f", colours=3),
+        ),
+    )
+    manifest = export(
+        result, tmp_path,
+        ExportSpec(formats=["png"], targets=["glaze-layers", "print-order"], basename="panel"),
+    )
+    sheet = next(e for e in manifest if e["target"] == "print-order")
+    text = (tmp_path / sheet["file"]).read_text()
+
+    assert "white underbase off" in text
+    assert "#7d9b8f" in text
+    for entry in manifest:
+        if entry["target"] == "glaze-layers":
+            assert entry["file"] in text
+
+
+def test_print_order_sheet_is_skipped_when_there_are_no_passes(tmp_path, base_shape, pattern_art):
+    result = compose(base_shape, pattern_art, ComposeSpec())
+    manifest = export(
+        result, tmp_path, ExportSpec(formats=["png"], targets=["print-order"])
+    )
+    assert manifest == []
+
+
+def test_a_smooth_fade_over_a_glaze_is_flagged(base_shape, pattern_art):
+    """Dropping passes unwinds the correction — the tool should say so."""
+    result = compose(
+        base_shape, pattern_art,
+        ComposeSpec(
+            keep="remove the white background",
+            glaze=GlazeSpec(enabled=True, glass="#7d9b8f", colours=3),
+            fade=Fade(mode="linear"),
+        ),
+    )
+    assert any("Fade by coverage instead" in note for note in result.notes)
+
+
+def test_a_screened_fade_over_a_glaze_is_not_flagged(base_shape, pattern_art):
+    """A dot screen keeps the whole stack in every dot, so the colour holds."""
+    result = compose(
+        base_shape, pattern_art,
+        ComposeSpec(
+            keep="remove the white background",
+            glaze=GlazeSpec(enabled=True, glass="#7d9b8f", colours=3),
+            fade=Fade(mode="linear", halftone_mm=2.0),
+        ),
+    )
+    assert not any("Fade by coverage instead" in note for note in result.notes)
+
+
+def test_a_screened_fade_keeps_every_dot_at_full_stack(base_shape, pattern_art):
+    """The reason to prefer coverage fading: the recipe survives intact."""
+    from glassprint import Raster
+
+    result = compose(
+        base_shape, pattern_art,
+        ComposeSpec(
+            keep="remove the white background",
+            glaze=GlazeSpec(enabled=True, glass="#7d9b8f", colours=3),
+            fade=Fade(mode="linear", halftone_mm=2.0),
+        ),
+    )
+    import tempfile, pathlib
+
+    with tempfile.TemporaryDirectory() as tmp:
+        manifest = export(
+            result, pathlib.Path(tmp), ExportSpec(formats=["png"], targets=["glaze-layers"])
+        )
+        # Every pass still prints somewhere, top and bottom of the ramp alike:
+        # the dots thin out, the stack behind each dot does not.
+        assert len(manifest) == len(result.glaze_plan.stack)
+        for entry in manifest:
+            alpha = Raster.open(entry["path"]).alpha_f
+            assert alpha[alpha > 0.5].mean() > 0.95

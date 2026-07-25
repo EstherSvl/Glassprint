@@ -267,11 +267,11 @@ software drives the passes:
   so printing them in order builds the gradient out of solid ink. Use these if
   you are driving the passes yourself.
 
-> Worth checking on your own machine: whether Studio will take a height map for
-> the relief pass, or whether you need to run the passes manually. The tool
-> gives you both shapes; which one you want is a question about the software,
-> not the file. Registration across several passes is the other thing to test —
-> misalignment shows up as colour fringing at edges.
+> **If your software only exposes the top layer** (plus white), the height-map
+> route is closed and `layers` is the one you want: print the passes yourself,
+> one file at a time. `--export print-order` writes a sheet telling you what to
+> print in what order. Registration is then the thing to test — misalignment
+> across passes shows up as colour fringing at edges.
 
 Element dropout is one draw per element from `--fade-seed`, so the same settings
 always produce the same scatter — preview and export match, and you can re-run a
@@ -378,11 +378,56 @@ literal nearest colour, which for a too-bright target is "print nothing".
 own ink; if a colour keeps missing, an ink near it fixes it instantly. Names or
 hex, any number of them.
 
-Use it in the pipeline with `--glaze --glass "#7d9b8f"`, and
-`--export glaze-layers` writes one file per pass — cyan #1, magenta #1, yellow
-#1… each at full strength, masked to the regions whose recipe calls for it. **A
-fade scales the pass counts along its ramp**, so layers come off toward the
-transparent edge, which is the layered gradient applied to a glaze.
+### Printing a glaze one pass at a time
+
+Use it in the pipeline with `--glaze --glass "#7d9b8f"`, then:
+
+```bash
+--export glaze-layers,print-order
+```
+
+`glaze-layers` writes one file per pass, each at full strength and masked to the
+regions whose recipe calls for it. They are numbered globally and zero-padded —
+`panel_pass01-cyan.png`, `panel_pass02-magenta.png` — **so sorting the folder by
+name gives you the order to feed them to the printer.** Every file is the full
+canvas at the same size and DPI, so they register with each other as long as the
+piece does not move between passes.
+
+`print-order` writes a sheet next to them listing the sequence, the recipes, and
+the one thing that will actually bite you:
+
+> **Turn the white underbase off on every pass.** White is opaque; laid under or
+> over a glaze it blocks the stack and you lose both the colour and the
+> transparency.
+
+### Glazing and fading pull against each other
+
+A glaze needs density — accuracy comes from absorption. A fade needs to reach
+zero density. So they meet awkwardly, and *how* you fade decides whether the
+colour survives.
+
+**Fading by dropping passes corrupts the colour.** A corrective recipe is
+usually shallow (two or three passes), and dropping from a shallow stack both
+gives you very few steps and unwinds the correction — so the colour reverts
+toward bare glass rather than dimming. A corrected red on green glass:
+
+| | Drop passes | Coverage fade (dots at full stack) |
+| --- | --- | --- |
+| full | `#6b140a` red | `#6b140a` red |
+| 60% | `#6b140a` red | `#724a3f` red |
+| 30% | `#7d9b8f` **green** | `#787267` red |
+| 0% | `#7d9b8f` green | `#7d9b8f` green |
+
+The left column is a hard edge with a hue flip in it. **So when you are glazing,
+fade by coverage — a dot screen or dissolve — not by stack depth.** Every dot
+then carries the whole recipe, the colour stays right the whole way down, and
+the fade is smooth. The tool warns you if you pair a glaze with a smooth tonal
+fade.
+
+```bash
+--glaze --glass "#7d9b8f" --fade linear --fade-halftone 1.5 \
+  --export glaze-layers,print-order
+```
 
 > The process-ink transmittances built in are nominal. If you can measure your
 > own inks on clear glass, put those hex values in `--palette` and every recipe

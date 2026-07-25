@@ -7,13 +7,14 @@ are resampled together so the overlay stays registered to the composite.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 
 from . import masks
-from .colors import parse_color
+from .colors import parse_color, to_hex
 from .compose import ComposeResult
 from .raster import (
     ALPHA_FORMATS,
@@ -26,7 +27,7 @@ from .raster import (
 
 TARGETS = (
     "composite", "overlay", "shape-mask", "cutout-mask",
-    "layer-map", "layers", "glaze-layers",
+    "layer-map", "layers", "glaze-layers", "print-order",
 )
 
 
@@ -99,6 +100,11 @@ def export(result: ComposeResult, out_dir: str | Path, spec: ExportSpec | None =
                     ],
                 }
             )
+
+    if "print-order" in spec.targets:
+        sheet = write_print_order(result, out_dir, basename, written)
+        if sheet:
+            written.append(sheet)
     return written
 
 
@@ -135,7 +141,7 @@ def _glaze_layers(result: ComposeResult) -> dict[str, Raster]:
 
     ramp = result.fade_field
     out: dict[str, Raster] = {}
-    for ink, index in plan.stack:
+    for order, (ink, index) in enumerate(plan.stack, start=1):
         counts = plan.counts_for(ink)
         if ramp is not None:
             counts = np.round(counts * ramp)
@@ -145,8 +151,14 @@ def _glaze_layers(result: ComposeResult) -> dict[str, Raster]:
         rgba = np.zeros((*alpha.shape, 4), dtype=np.uint8)
         rgba[:, :, :3] = np.array(ink.rgb, dtype=np.uint8)[None, None, :]
         rgba[:, :, 3] = np.clip(alpha * 255.0 + 0.5, 0, 255).astype(np.uint8)
-        out[f"glaze{index}-{ink.name.lstrip('#')}"] = Raster(rgba, dpi=result.composite.dpi)
+        # Zero-padded and numbered globally, so sorting the folder by name
+        # gives you the order to feed them to the printer.
+        out[glaze_pass_name(order, ink.name)] = Raster(rgba, dpi=result.composite.dpi)
     return out
+
+
+def glaze_pass_name(order: int, ink_name: str) -> str:
+    return f"pass{order:02d}-{ink_name.lstrip('#')}"
 
 
 def _layer_map(result: ComposeResult) -> dict[str, Raster]:
@@ -212,9 +224,81 @@ def _formats_for(spec: ExportSpec, result: ComposeResult) -> dict[str, list[str]
     for index in range(1, max(1, result.fade.layers) + 1):
         formats[f"layer{index}of{result.fade.layers}"] = overlay
     if result.glaze_plan is not None:
-        for ink, index in result.glaze_plan.stack:
-            formats[f"glaze{index}-{ink.name.lstrip('#')}"] = overlay
+        for order, (ink, _) in enumerate(result.glaze_plan.stack, start=1):
+            formats[glaze_pass_name(order, ink.name)] = overlay
     return formats
+
+
+def write_print_order(result: ComposeResult, out_dir: Path, basename: str, written: list[dict]) -> dict | None:
+    """A sheet telling you what to print, in what order, and what to watch for.
+
+    Printing a glaze means feeding the machine one pass at a time, so the thing
+    that actually goes wrong is a human one: passes out of order, or the white
+    underbase left switched on and burying the glaze underneath it.
+    """
+    # Manifest entries are labelled by layer name, so pick the pass files out
+    # by their naming: "pass01-cyan" for glazes, "layer2of4" for one repeated ink.
+    passes = [
+        entry
+        for entry in written
+        if entry["target"].startswith("pass") or re.fullmatch(r"layer\d+of\d+", entry["target"])
+    ]
+    if not passes:
+        return None
+
+    passes.sort(key=lambda entry: entry["file"])
+    lines = [
+        f"# Print order — {basename}",
+        "",
+        f"{len(passes)} passes, printed one at a time in this order.",
+        "",
+        "**Turn the white underbase off on every pass.** White is opaque; laid under or",
+        "over a glaze it blocks the stack and you lose both the colour and the",
+        "transparency. Each pass goes straight onto the glass or onto the cured pass",
+        "below it.",
+        "",
+        "Every file is the full canvas at the same size and DPI, so the passes register",
+        "with each other as long as the piece does not move between them.",
+        "",
+    ]
+
+    if result.glaze_plan is not None:
+        lines += [f"Glass: `{to_hex(result.glaze_plan.glass)}`", ""]
+
+    lines.append("| # | File | Ink |")
+    lines.append("| --- | --- | --- |")
+    for index, entry in enumerate(passes, start=1):
+        ink = entry["file"].rsplit("-", 1)[-1].rsplit(".", 1)[0]
+        lines.append(f"| {index} | `{entry['file']}` | {ink} |")
+
+    if result.glaze_plan is not None:
+        lines += ["", "## Recipes", ""]
+        for recipe in result.glaze_plan.recipes:
+            mark = "" if recipe.reachable else "  ⚠"
+            lines.append(
+                f"- `{to_hex(recipe.target)}` → `{to_hex(recipe.achieved)}` "
+                f"— {recipe.describe()}{mark}"
+            )
+        unreachable = [r for r in result.glaze_plan.recipes if not r.reachable]
+        if unreachable:
+            lines += [
+                "",
+                "⚠ marks colours brighter than the glass. They print darker than asked; "
+                "only a white base could give them the brightness.",
+            ]
+
+    path = out_dir / f"{basename}_print-order.md"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return {
+        "path": str(path),
+        "file": path.name,
+        "target": "print-order",
+        "format": "md",
+        "alpha": False,
+        "pixels": [0, 0],
+        "dpi": 0,
+        "size_mm": [0, 0],
+    }
 
 
 def _resize_for_output(layer: Raster, spec: ExportSpec, dpi: float) -> Raster:

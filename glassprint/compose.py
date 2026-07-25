@@ -316,6 +316,14 @@ def compose(
             max_per_ink=spec.glaze.max_per_ink,
             max_total=spec.glaze.max_total,
         )
+        if spec.fade.active and not (spec.fade.screened or spec.fade.stacked or spec.fade.dissolve > 0):
+            notes.append(
+                "A smooth fade eats the glaze stack itself, so the correction unwinds as it "
+                "thins and the colour reverts toward the bare glass — with only a few passes "
+                "that reads as a hard edge, not a fade. Fade by coverage instead (a dot "
+                "screen or dissolve): every dot keeps the whole stack, so the colour stays "
+                "right the whole way down."
+            )
         for recipe in plan_.recipes:
             if recipe.note:
                 notes.append(f"Glaze — {to_hex(recipe.target)}: {recipe.note}")
