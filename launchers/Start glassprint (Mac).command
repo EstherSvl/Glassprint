@@ -25,7 +25,7 @@ for candidate in python3.12 python3.11 python3; do
 done
 [ -n "$PYTHON" ] || fail "Python 3 is not installed. Get it from python.org, then try again."
 
-if [ ! -x .venv/bin/glassprint ]; then
+if [ ! -x .venv/bin/python ]; then
   echo "First run — installing glassprint. This takes a minute or two…"
   "$PYTHON" -m venv .venv || fail "Could not create the environment in $(pwd)/.venv"
   .venv/bin/python -m pip install --quiet --upgrade pip
@@ -34,7 +34,7 @@ if [ ! -x .venv/bin/glassprint ]; then
   echo
 fi
 
-.venv/bin/glassprint serve --lan
+.venv/bin/python -m glassprint.cli serve --lan
 echo
 echo "glassprint has stopped. Press any key to close this window."
 read -r -n 1 -s

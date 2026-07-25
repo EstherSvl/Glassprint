@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -309,21 +310,43 @@ def glaze(
     _echo_notes(backends.notes)
 
 
-def _lan_address() -> str | None:
-    """This machine's address on the local network, for tablets and phones."""
+def _lan_addresses() -> list[str]:
+    """This machine's addresses on the local network, best guess first.
+
+    The tablet needs one it can actually reach, and a desktop often has several
+    — Wi-Fi, Ethernet, a VPN, and on Windows the virtual adapters that Hyper-V
+    and WSL leave behind. Rather than pick one and be wrong, offer the one the
+    system would route out of, then anything else worth trying.
+    """
     import socket
+
+    found: list[str] = []
+
+    def add(address: str) -> None:
+        # Loopback is no use to another device, and 169.254.x means the adapter
+        # never got an address at all.
+        if address and address not in found and not address.startswith(("127.", "169.254.")):
+            found.append(address)
 
     try:
         probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         probe.settimeout(0.2)
-        # Nothing is actually sent; this just asks the OS which interface it
-        # would route out of.
-        probe.connect(("192.168.255.255", 1))
-        address = probe.getsockname()[0]
+        # Nothing is sent; connecting a UDP socket just consults the routing
+        # table for the interface it would leave by.
+        probe.connect(("8.8.8.8", 53))
+        add(probe.getsockname()[0])
         probe.close()
-        return address if not address.startswith("127.") else None
     except OSError:
-        return None
+        pass
+
+    try:
+        add_all = socket.gethostbyname_ex(socket.gethostname())[2]
+        for address in add_all:
+            add(address)
+    except OSError:
+        pass
+
+    return found
 
 
 @app.command()
@@ -345,18 +368,27 @@ def serve(
     typer.secho(f"glassprint running at {url}", fg=typer.colors.GREEN)
 
     if lan:
-        address = _lan_address()
-        if address:
+        addresses = _lan_addresses()
+        if addresses:
             typer.secho(
-                f"On your iPad or phone, open:  http://{address}:{port}/",
+                f"On your iPad or phone, open:  http://{addresses[0]}:{port}/",
                 fg=typer.colors.CYAN,
                 bold=True,
             )
             typer.echo("  (same Wi-Fi network, and leave this window open)")
+            for other in addresses[1:]:
+                typer.echo(f"  if that one does not work, try:  http://{other}:{port}/")
         else:
             typer.secho(
                 "Could not work out this machine's network address — check Wi-Fi is on.",
                 fg=typer.colors.YELLOW,
+            )
+        if sys.platform == "win32":
+            # The prompt appears behind other windows often enough that people
+            # miss it, then blame the address.
+            typer.echo(
+                "  Windows may ask whether to allow Python through the firewall —\n"
+                "  say yes for private networks, or the tablet cannot connect."
             )
 
     typer.echo("Press Ctrl+C to stop.")

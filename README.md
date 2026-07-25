@@ -18,9 +18,21 @@ on the optional Claude integration.
 
 ## Install
 
+The launchers in `launchers/` do all of this for you — double-click
+**`Start glassprint (Windows).bat`** (or the `.command` on macOS) and skip to
+[Use it](#use-it). By hand:
+
+```bat
+git clone https://github.com/EstherSvl/Glassprint.git
+cd Glassprint
+py -3 -m venv .venv
+.venv\Scripts\activate
+pip install -e .
+```
+
+On macOS or Linux the last three lines are:
+
 ```bash
-git clone https://github.com/EstherSvl/glassprint.git
-cd glassprint
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 ```
@@ -56,20 +68,30 @@ stays in sight while you scroll the controls under it.
 
 <img src="docs/ipad.png" alt="the interface on an iPad, held upright" width="420" />
 
-**If a Mac or PC is on the same Wi-Fi**, start the server with `--lan`:
+**If the desktop is on the same Wi-Fi**, double-click
+**`launchers/Start glassprint (Windows).bat`** — or on macOS, the `.command`.
+The first run installs everything; every run after that just starts up. The
+equivalent by hand is `glassprint serve --lan`.
 
-```bash
-glassprint serve --lan
+Either way it prints an address for the tablet:
+
+```
+glassprint running at http://127.0.0.1:8765/
+On your iPad or phone, open:  http://192.168.1.24:8765/
+  (same Wi-Fi network, and leave this window open)
 ```
 
-It prints a second address — something like `http://192.168.1.24:8765/`. Type
-that into Safari on the tablet and you get the full interface, with the computer
-doing the work. Exports land in the folder on the computer.
+Type that into Safari on the iPad and you get the full interface, with the
+desktop doing the work. Exports land in a folder on the desktop.
 
-Nothing needs typing on the computer either: double-click
-**`launchers/Start glassprint (Mac).command`** (or the `.bat` on Windows). The
-first run installs everything, and every run after that just starts the server
-and prints the address.
+Two things that trip this up, both on the desktop rather than the tablet:
+
+- **Windows asks whether to allow Python through the firewall** the first time
+  it listens on the network. Say yes, for private networks. The prompt can
+  appear behind the window. Refuse it and the address simply will not answer.
+- **A VPN** can make the desktop advertise an address the tablet cannot reach.
+  If the first address does not work, the others printed under it are worth
+  trying; failing that, turn the VPN off.
 
 **If there is no computer involved**, use the single-file build:
 `docs/index.html`. It carries the whole tool inside it and runs Python in
@@ -78,7 +100,7 @@ the browser tab, so the iPad does the work itself.
 It needs to be served over `https`. The shortest way is GitHub Pages: in this
 repository, **Settings → Pages**, set the source to the `main` branch and the
 `/docs` folder, and save. A minute later the tool is at
-`https://esthersvl.github.io/glassprint/` — bookmark that on the iPad and add it
+`https://esthersvl.github.io/Glassprint/` — bookmark that on the iPad and add it
 to the home screen. Any other https host works the same way; the file has no
 server side to it.
 
