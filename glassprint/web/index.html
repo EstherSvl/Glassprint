@@ -229,7 +229,91 @@
     </section>
 
     <section class="card">
-      <h2>6 · Export</h2>
+      <h2>6 · Fade into the glass</h2>
+      <div class="segmented" id="fade-modes">
+        <button type="button" data-value="none" class="active">Off</button>
+        <button type="button" data-value="linear">Linear</button>
+        <button type="button" data-value="radial">Radial</button>
+        <button type="button" data-value="shape">From the edge</button>
+      </div>
+      <div id="fade-body" hidden>
+        <label class="field">
+          <span>Which elements fade <em class="soft">blank = all</em></span>
+          <input type="text" id="fade-what" placeholder="e.g. the leaves" />
+        </label>
+        <label class="field" id="fade-angle-field">
+          <span>Direction <em id="fade-angle-value">90°</em></span>
+          <input type="range" id="fade-angle" min="0" max="360" step="5" value="90" />
+        </label>
+        <div class="row">
+          <label class="field">
+            <span>Starts at <em id="fade-start-value">0%</em></span>
+            <input type="range" id="fade-start" min="0" max="1" step="0.01" value="0" />
+          </label>
+          <label class="field">
+            <span>Gone by <em id="fade-end-value">100%</em></span>
+            <input type="range" id="fade-end" min="0" max="1" step="0.01" value="1" />
+          </label>
+        </div>
+        <label class="field">
+          <span>Curve <em id="fade-curve-value">1.0</em></span>
+          <input type="range" id="fade-curve" min="0.25" max="4" step="0.05" value="1" />
+          <span class="hint">Higher holds the ink longer, then drops away late.</span>
+        </label>
+        <label class="field">
+          <span>Dissolve <em id="fade-dissolve-value">0%</em></span>
+          <input type="range" id="fade-dissolve" min="0" max="1" step="0.05" value="0" />
+          <span class="hint">0 thins every element. 1 drops elements whole and keeps
+            the survivors solid — the safest option for printing.</span>
+        </label>
+        <details>
+          <summary>Fine adjustments</summary>
+          <div class="row">
+            <label class="field">
+              <span>Start opacity <em id="fade-max-value">100%</em></span>
+              <input type="range" id="fade-max" min="0" max="1" step="0.05" value="1" />
+            </label>
+            <label class="field">
+              <span>End opacity <em id="fade-min-value">0%</em></span>
+              <input type="range" id="fade-min" min="0" max="1" step="0.05" value="0" />
+            </label>
+          </div>
+          <div class="row" id="fade-center-row" hidden>
+            <label class="field">
+              <span>Centre across <em id="fade-center-x-value">50%</em></span>
+              <input type="range" id="fade-center-x" min="0" max="1" step="0.01" value="0.5" />
+            </label>
+            <label class="field">
+              <span>Centre down <em id="fade-center-y-value">50%</em></span>
+              <input type="range" id="fade-center-y" min="0" max="1" step="0.01" value="0.5" />
+            </label>
+          </div>
+          <label class="field">
+            <span>Minimum printable ink <em id="fade-cutoff-value">off</em></span>
+            <input type="range" id="fade-cutoff" min="0" max="0.4" step="0.01" value="0" />
+            <span class="hint">Anything fainter is dropped. UV dithering gets speckly under ~12%.</span>
+          </label>
+          <div class="row">
+            <label class="checkbox">
+              <input type="checkbox" id="fade-per-element" />
+              <span>One opacity per element</span>
+            </label>
+            <label class="checkbox">
+              <input type="checkbox" id="fade-invert" />
+              <span>Reverse direction</span>
+            </label>
+          </div>
+          <label class="field">
+            <span>Dissolve seed</span>
+            <input type="number" id="fade-seed" value="0" step="1" />
+            <span class="hint">Same seed, same scatter — preview and export match.</span>
+          </label>
+        </details>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>7 · Export</h2>
       <div class="row">
         <label class="field">
           <span>Formats</span>
@@ -288,7 +372,14 @@
         <button type="button" data-value="shape_mask">Shape mask</button>
         <button type="button" data-value="cutout_mask">Cut-out mask</button>
       </div>
-      <button type="button" class="ghost" id="refresh">Refresh preview</button>
+      <div class="stage-tools">
+        <label class="checkbox glass-toggle">
+          <input type="checkbox" id="glass-on" />
+          <span>On glass</span>
+          <input type="color" id="glass-color" value="#cfdad6" title="Glass colour" />
+        </label>
+        <button type="button" class="ghost" id="refresh">Refresh preview</button>
+      </div>
     </div>
     <div class="viewport" id="viewport">
       <div class="empty" id="empty-state">

@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 from .compose import ComposeSpec, compose
 from .export import ExportSpec, export
+from .fade import Fade
 from .pattern import Placement
 from .raster import READ_SUFFIXES, Raster
 from .recolor import ColorSpec
@@ -103,6 +104,7 @@ def _optional_float(value: Any) -> float | None:
 def _build_spec(payload: dict[str, Any]) -> ComposeSpec:
     placement_data = payload.get("placement") or {}
     color_data = payload.get("color") or {}
+    fade_data = payload.get("fade") or {}
 
     rect = payload.get("target_rect")
     target_rect = None
@@ -146,6 +148,23 @@ def _build_spec(payload: dict[str, Any]) -> ComposeSpec:
             brightness=_float(color_data.get("brightness"), 1.0),
             contrast=_float(color_data.get("contrast"), 1.0),
             invert=bool(color_data.get("invert")),
+        ),
+        fade=Fade(
+            mode=str(fade_data.get("mode") or "none"),
+            what=str(fade_data.get("what") or ""),
+            angle=_float(fade_data.get("angle"), 90.0),
+            center_x=_float(fade_data.get("center_x"), 0.5),
+            center_y=_float(fade_data.get("center_y"), 0.5),
+            start=_float(fade_data.get("start"), 0.0),
+            end=_float(fade_data.get("end"), 1.0),
+            curve=_float(fade_data.get("curve"), 1.0),
+            min_alpha=_float(fade_data.get("min_alpha"), 0.0),
+            max_alpha=_float(fade_data.get("max_alpha"), 1.0),
+            per_element=bool(fade_data.get("per_element")),
+            dissolve=_float(fade_data.get("dissolve"), 0.0),
+            seed=int(_float(fade_data.get("seed"), 0.0)),
+            invert=bool(fade_data.get("invert")),
+            cutoff=_float(fade_data.get("cutoff"), 0.0),
         ),
     )
 

@@ -148,6 +148,82 @@ hard 1-bit cut.
 Plus `--hue-shift`, `--saturation`, `--brightness` and `--contrast` for smaller
 adjustments.
 
+## Fading into the glass
+
+The fade lowers **alpha**, not colour. That matters: Studio builds the white
+underbase from the alpha channel, so thinning alpha thins the white and the
+glass genuinely takes over. Blending the artwork toward the glass colour instead
+would leave the underbase at full density and print a solid white patch with
+pale ink on it — a sticker fading, not ink dissolving.
+
+### Two ways to express it, and they mix
+
+| | What it does | On glass |
+| --- | --- | --- |
+| **Tonal** (`--fade-dissolve 0`) | Every element gets more transparent | Smooth, but the tail runs into the printer's dither floor and goes speckly |
+| **Dissolve** (`--fade-dissolve 1`) | Whole elements drop out at an increasing rate; survivors stay fully opaque | Never prints faint, so never speckles. Reads as the pattern thinning out |
+
+**For a repeating pattern, dissolve is usually the better answer** — nothing is
+ever printed at an unprintable density. In between (say `0.5`) some elements
+fade faster than others, which gives a softer, more organic scatter.
+
+![a pattern dissolving down a panel, previewed on green glass](docs/fade-dissolve.png)
+
+Element dropout is one draw per element from `--fade-seed`, so the same settings
+always produce the same scatter — preview and export match, and you can re-run a
+print months later and get the same object.
+
+### The controls
+
+| Control | What it does |
+| --- | --- |
+| `--fade linear\|radial\|shape` | Direction. `shape` fades from the edge of the target silhouette inwards, which suits a panel |
+| `--fade-angle` | 90 fades downward, 0 to the right, 270 upward |
+| `--fade-start` / `--fade-end` | Where along the axis the fade begins and completes. **Narrowing the gap is how you make it happen faster** |
+| `--fade-curve` | The rate. 1 is linear; above 1 holds the ink then drops away late; below 1 drops away immediately then trails off |
+| `--fade-min` / `--fade-max` | The two ends of the ramp. Raise `--fade-min` to fade to a ghost rather than to nothing |
+| `--fade-dissolve` | Tonal ↔ dropout, as above |
+| `--fade-per-element` | Give each element one opacity instead of letting the ramp cut through it. Keeps motifs crisp |
+| `--fade-what` | **Which elements fade**, in the same language as `--keep` |
+| `--fade-invert` | Reverse the direction |
+| `--fade-cutoff` | Snap alpha below this to zero |
+
+### Choosing what fades
+
+`--fade-what` takes the same instructions as `--keep`, so you can fade one part
+of the artwork and leave the rest solid:
+
+```bash
+glassprint compose panel.png botanical.png \
+  --keep "remove the white background" \
+  --fade linear --fade-what "the leaves" --fade-curve 1.6
+```
+
+The selector runs against the *source* artwork, before any recolouring, so
+"the leaves" still means the leaves after you have tinted everything one colour.
+It is then tiled in step with the pattern. If nothing matches, the fade is left
+off and the tool says so rather than quietly fading everything.
+
+### Watching the printable floor
+
+UV dithering starts breaking up under roughly 12% coverage. The readout reports
+**faintest ink** — the thinnest ink that will actually be laid down, measured on
+solid areas only so anti-aliased edges don't drag it to zero — and warns when
+you're under that. The three ways out are: raise the end opacity, add dissolve,
+or set a minimum printable ink level.
+
+```
+fade         : linear · 90° · 0–1 · 100% dissolve over 458 elements
+faintest ink : 94% coverage
+```
+
+### Judging it
+
+A fade-to-transparent cannot be judged against a checkerboard. Tick **On glass**
+above the preview and set the colour of the glass you're printing on — the
+preview then sits on that colour, which is what the finished piece will look
+like. It changes the preview only, never the exported files.
+
 ## Export
 
 Formats: PNG, TIFF, JPEG, WebP, BMP. Reads those plus PSD and GIF.

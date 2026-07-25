@@ -7,6 +7,7 @@ const state = {
   images: {},
   view: "composite",
   target: "alpha",
+  fadeMode: "none",
   lastPreview: null,
   inFlight: null,
   capabilities: null,
@@ -69,6 +70,23 @@ function buildSpec() {
       saturation: Number($("saturation").value),
       brightness: Number($("brightness").value),
       contrast: Number($("contrast").value),
+    },
+    fade: {
+      mode: state.fadeMode,
+      what: $("fade-what").value,
+      angle: Number($("fade-angle").value),
+      center_x: Number($("fade-center-x").value),
+      center_y: Number($("fade-center-y").value),
+      start: Number($("fade-start").value),
+      end: Number($("fade-end").value),
+      curve: Number($("fade-curve").value),
+      min_alpha: Number($("fade-min").value),
+      max_alpha: Number($("fade-max").value),
+      per_element: $("fade-per-element").checked,
+      dissolve: Number($("fade-dissolve").value),
+      seed: num("fade-seed", 0),
+      invert: $("fade-invert").checked,
+      cutoff: Number($("fade-cutoff").value),
     },
     include_masks: state.view === "shape_mask" || state.view === "cutout_mask",
   };
@@ -146,7 +164,29 @@ function renderReadout(summary) {
     ["Cut-out", `${summary.plan} — ${Math.round(summary.cutout_coverage * 100)}% of the artwork kept`],
   ];
 
-  const notes = (summary.notes || []).map((n) => `<p class="note">${escapeHtml(n)}</p>`).join("");
+  // Below 10% a whole-number percentage rounds to a useless "0%".
+  const asCoverage = (v) => (v < 0.1 ? `${(v * 100).toFixed(1)}%` : `${Math.round(v * 100)}%`);
+
+  const fade = summary.fade || {};
+  const warnings = [];
+  if (fade.mode && fade.mode !== "none") {
+    const faintest = fade.faintest_alpha || 0;
+    const over = fade.elements ? ` over ${fade.elements} elements` : "";
+    rows.push(["Fade", fade.describe + over]);
+    rows.push(["Faintest ink", `${asCoverage(faintest)} coverage`]);
+
+    if (faintest > 0 && faintest < 0.12) {
+      warnings.push(
+        `The thinnest ink is at ${asCoverage(faintest)} coverage. UV dithering tends to ` +
+          "go speckly under about 12% — raise the end opacity, add some dissolve, or set " +
+          "a minimum printable ink level."
+      );
+    }
+  }
+
+  const notes = (warnings.concat(summary.notes || []))
+    .map((n) => `<p class="note">${escapeHtml(n)}</p>`)
+    .join("");
   $("readout").innerHTML =
     "<dl>" +
     rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${escapeHtml(String(v))}</dd></div>`).join("") +
@@ -330,6 +370,29 @@ function updateLabels() {
   const tiling = $("fit").value === "tile" || $("fit").value === "auto";
   $("tile-controls").style.opacity = tiling ? "1" : "0.45";
   $("target-describe").hidden = state.target !== "describe";
+
+  $("fade-angle-value").textContent = `${$("fade-angle").value}°`;
+  $("fade-start-value").textContent = percent("fade-start");
+  $("fade-end-value").textContent = percent("fade-end");
+  $("fade-curve-value").textContent = Number($("fade-curve").value).toFixed(2);
+  $("fade-dissolve-value").textContent = percent("fade-dissolve");
+  $("fade-min-value").textContent = percent("fade-min");
+  $("fade-max-value").textContent = percent("fade-max");
+  $("fade-center-x-value").textContent = percent("fade-center-x");
+  $("fade-center-y-value").textContent = percent("fade-center-y");
+  const cutoff = Number($("fade-cutoff").value);
+  $("fade-cutoff-value").textContent = cutoff > 0 ? `${Math.round(cutoff * 100)}%` : "off";
+
+  $("fade-body").hidden = state.fadeMode === "none";
+  $("fade-angle-field").hidden = state.fadeMode !== "linear";
+  $("fade-center-row").hidden = state.fadeMode !== "radial";
+}
+
+function applyGlassBackdrop() {
+  const on = $("glass-on").checked;
+  const viewport = $("viewport");
+  viewport.classList.toggle("on-glass", on);
+  viewport.style.backgroundColor = on ? $("glass-color").value : "";
 }
 
 function linkColor(pickerId, hexId) {
@@ -383,12 +446,27 @@ function init() {
     }
   });
 
+  bindSegmented("fade-modes", (value) => {
+    state.fadeMode = value;
+    updateLabels();
+    schedulePreview(0);
+  });
+
   bindLive([
     "keep", "tolerance", "use-claude", "target-describe", "clip", "shape-grow", "shape-feather",
     "edge-feather", "fit", "mirror", "repeat-across", "repeat-mm", "scale", "rotation",
     "offset-x", "offset-y", "flip-h", "flip-v", "color-mode", "strength", "hue-shift",
     "saturation", "brightness", "contrast", "opacity", "blend",
+    "fade-what", "fade-angle", "fade-start", "fade-end", "fade-curve", "fade-dissolve",
+    "fade-min", "fade-max", "fade-center-x", "fade-center-y", "fade-cutoff",
+    "fade-per-element", "fade-invert", "fade-seed",
   ]);
+
+  $("glass-on").addEventListener("change", applyGlassBackdrop);
+  $("glass-color").addEventListener("input", () => {
+    $("glass-on").checked = true;
+    applyGlassBackdrop();
+  });
 
   linkColor("color", "color-hex");
   linkColor("color2", "color2-hex");
@@ -398,6 +476,7 @@ function init() {
   $("export-button").addEventListener("click", runExport);
 
   updateLabels();
+  applyGlassBackdrop();
   loadCapabilities();
 }
 

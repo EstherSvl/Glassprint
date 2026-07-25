@@ -13,6 +13,7 @@ Typical use::
 from .colors import parse_color, to_hex
 from .compose import ComposeResult, ComposeSpec, compose
 from .export import ExportSpec, export
+from .fade import Fade
 from .nl import build_plan, parse as parse_instruction
 from .pattern import Placement, PatternInfo, analyse
 from .raster import Raster
@@ -27,6 +28,7 @@ __all__ = [
     "ComposeResult",
     "ComposeSpec",
     "ExportSpec",
+    "Fade",
     "MaskOp",
     "MaskPlan",
     "PatternInfo",

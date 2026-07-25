@@ -11,6 +11,7 @@ import typer
 from . import __version__
 from .compose import ComposeSpec, compose
 from .export import ExportSpec, export
+from .fade import Fade
 from .nl import build_plan
 from .pattern import Placement, analyse
 from .raster import Raster
@@ -110,6 +111,21 @@ def compose_command(
     brightness: float = typer.Option(1.0, "--brightness"),
     contrast: float = typer.Option(1.0, "--contrast"),
     hue_shift: float = typer.Option(0.0, "--hue-shift", help="Degrees."),
+    fade: str = typer.Option("none", "--fade", help="none | linear | radial | shape"),
+    fade_what: str = typer.Option("", "--fade-what", help="Which elements fade, in plain English."),
+    fade_angle: float = typer.Option(90.0, "--fade-angle", help="90 fades downward, 0 to the right."),
+    fade_start: float = typer.Option(0.0, "--fade-start", help="Where the fade begins (0-1)."),
+    fade_end: float = typer.Option(1.0, "--fade-end", help="Where the fade completes (0-1)."),
+    fade_curve: float = typer.Option(1.0, "--fade-curve", help=">1 holds on then drops late; <1 drops away early."),
+    fade_min: float = typer.Option(0.0, "--fade-min", help="Opacity at the far end of the ramp."),
+    fade_max: float = typer.Option(1.0, "--fade-max", help="Opacity at the near end of the ramp."),
+    fade_center_x: float = typer.Option(0.5, "--fade-center-x"),
+    fade_center_y: float = typer.Option(0.5, "--fade-center-y"),
+    fade_per_element: bool = typer.Option(False, "--fade-per-element", help="One opacity per element."),
+    fade_dissolve: float = typer.Option(0.0, "--fade-dissolve", help="0 thins every element, 1 drops elements whole."),
+    fade_seed: int = typer.Option(0, "--fade-seed", help="Keeps the dissolve reproducible."),
+    fade_invert: bool = typer.Option(False, "--fade-invert"),
+    fade_cutoff: float = typer.Option(0.0, "--fade-cutoff", help="Snap alpha below this to zero (~0.12 for UV)."),
     opacity: float = typer.Option(1.0, "--opacity"),
     blend: str = typer.Option("normal", "--blend", help="normal | multiply | screen | overlay"),
     no_clip: bool = typer.Option(False, "--no-clip", help="Do not clip the overlay to the shape."),
@@ -162,6 +178,23 @@ def compose_command(
             mirror=mirror,
         ),
         color=color_spec,
+        fade=Fade(
+            mode=fade,
+            what=fade_what,
+            angle=fade_angle,
+            center_x=fade_center_x,
+            center_y=fade_center_y,
+            start=fade_start,
+            end=fade_end,
+            curve=fade_curve,
+            min_alpha=fade_min,
+            max_alpha=fade_max,
+            per_element=fade_per_element,
+            dissolve=fade_dissolve,
+            seed=fade_seed,
+            invert=fade_invert,
+            cutoff=fade_cutoff,
+        ),
     )
 
     backends = Backends()
@@ -189,6 +222,19 @@ def compose_command(
         f"  artwork      : {'pattern' if result.info.is_pattern else 'motif'} — {result.info.reason}"
     )
     typer.echo(f"  target shape : {result.box[2] - result.box[0]} x {result.box[3] - result.box[1]} px")
+    if result.fade.active:
+        faintest = result.faintest_alpha()
+        line = f"  fade         : {result.fade.describe()}"
+        if result.fade_elements:
+            line += f" over {result.fade_elements} elements"
+        typer.echo(line)
+        typer.echo(f"  faintest ink : {faintest:.0%} coverage")
+        if 0 < faintest < 0.12:
+            typer.secho(
+                "  note: the faintest ink is under ~12% — UV dithering may go speckly there. "
+                "Raise --fade-min, or set --fade-cutoff 0.12 to drop the tail.",
+                fg=typer.colors.YELLOW,
+            )
     for entry in manifest:
         size = entry["size_mm"]
         typer.echo(

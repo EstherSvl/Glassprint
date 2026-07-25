@@ -10,7 +10,9 @@ from dataclasses import dataclass, field, replace as dataclass_replace
 
 import numpy as np
 
+from . import fade as fade_module
 from . import masks, nl, pattern, recolor, segment
+from .fade import Fade
 from .pattern import Box, PatternInfo, Placement
 from .raster import Raster
 from .recolor import ColorSpec
@@ -42,13 +44,16 @@ class ComposeSpec:
 
     placement: Placement = field(default_factory=Placement)
     color: ColorSpec = field(default_factory=ColorSpec)
+    fade: Fade = field(default_factory=Fade)
 
     def validated(self) -> "ComposeSpec":
         if self.target not in TARGET_MODES:
             raise ValueError(f"unknown target mode {self.target!r}; choose from {', '.join(TARGET_MODES)}")
         if self.blend not in BLEND_MODES:
             raise ValueError(f"unknown blend mode {self.blend!r}; choose from {', '.join(BLEND_MODES)}")
-        return dataclass_replace(self, placement=self.placement.normalised())
+        return dataclass_replace(
+            self, placement=self.placement.normalised(), fade=self.fade.validated()
+        )
 
 
 @dataclass
@@ -61,7 +66,19 @@ class ComposeResult:
     plan: MaskPlan
     info: PatternInfo
     box: Box
+    fade: Fade = field(default_factory=Fade)
+    fade_elements: int = 0
+    faintest_ink: float = 0.0
     notes: list[str] = field(default_factory=list)
+
+    def faintest_alpha(self) -> float:
+        """The thinnest ink that will actually be laid down, as 0..1 coverage.
+
+        Measured only where the artwork was solid to begin with, so soft
+        anti-aliased edges — which every image has — do not drag it to zero.
+        Under roughly 0.12 the printer's dither starts breaking up.
+        """
+        return self.faintest_ink
 
     def summary(self) -> dict:
         left, top, right, bottom = self.box
@@ -84,6 +101,17 @@ class ComposeResult:
                 "suggested_fit": self.info.suggested_fit,
                 "suggested_repeats": self.info.suggested_repeats,
                 "reason": self.info.reason,
+            },
+            "fade": {
+                "mode": self.fade.mode,
+                "describe": self.fade.describe(),
+                "scope": self.fade.what.strip(),
+                "elements": self.fade_elements,
+                "dissolve": self.fade.dissolve,
+                "cutoff": self.fade.cutoff,
+                # The faintest ink that will actually be laid down. Under about
+                # 0.12 the printer's dither starts to break up.
+                "faintest_alpha": self.faintest_alpha(),
             },
             "notes": self.notes,
         }
@@ -201,14 +229,29 @@ def compose(
         target_dpi=base.effective_dpi[0],
     )
 
-    # 4. Clip to the shape and apply opacity.
+    # 4. Fade into the glass, then clip to the shape and apply opacity.
     layer_alpha = placed[:, :, 3].astype(np.float32) / 255.0
+    faded_elements = 0
+
+    if spec.fade.active:
+        opacity_field = fade_module.ramp(
+            spec.fade, (base.height, base.width), box, shaped
+        )
+        scope, scope_note = _fade_scope(overlay, cutout, base, box, spec, info, backends)
+        if scope_note:
+            notes.append(scope_note)
+        layer_alpha, faded_elements = fade_module.apply(
+            layer_alpha, opacity_field, spec.fade, scope
+        )
+
     if spec.clip_to_shape:
         layer_alpha = layer_alpha * shaped
     layer_alpha = layer_alpha * float(np.clip(spec.opacity, 0.0, 1.0))
+    layer_alpha = fade_module.apply_cutoff(layer_alpha, spec.fade.cutoff)
 
     overlay_layer = placed.copy()
     overlay_layer[:, :, 3] = np.clip(layer_alpha * 255.0 + 0.5, 0, 255).astype(np.uint8)
+    faintest = _faintest_ink(placed, layer_alpha, shaped if spec.clip_to_shape else None)
 
     # 5. Blend over the base.
     composite = _blend_over(base.rgba, overlay_layer, spec.blend)
@@ -223,8 +266,63 @@ def compose(
         plan=plan,
         info=info,
         box=box,
+        fade=spec.fade,
+        fade_elements=faded_elements,
+        faintest_ink=faintest,
         notes=notes,
     )
+
+
+def _faintest_ink(
+    placed: np.ndarray, layer_alpha: np.ndarray, shaped: np.ndarray | None
+) -> float:
+    """The thinnest ink laid down, ignoring anti-aliased edges.
+
+    Only pixels that were solid in the artwork *and* well inside the target
+    shape count, so the number reflects the fade rather than the unavoidable
+    soft pixel at the edge of every curve.
+    """
+    solid = placed[:, :, 3] > 242
+    if shaped is not None:
+        solid = solid & (shaped > 0.95)
+    printed = layer_alpha[solid & (layer_alpha > 0.002)]
+    return round(float(printed.min()), 3) if printed.size else 0.0
+
+
+def _fade_scope(
+    overlay: Raster,
+    cutout: np.ndarray,
+    base: Raster,
+    box: Box,
+    spec: ComposeSpec,
+    info: PatternInfo,
+    backends: Backends,
+) -> tuple[np.ndarray | None, str | None]:
+    """Which of the placed elements the fade is allowed to touch.
+
+    The selector runs against the *source* artwork, before recolouring, so
+    "fade the leaves" still means the leaves after you have tinted everything
+    one colour. The resulting mask is then placed with the same settings as the
+    artwork, so it tiles in step with it.
+    """
+    what = spec.fade.what.strip()
+    if not what:
+        return None, None
+
+    plan = nl.build_plan(what, overlay, use_claude=spec.use_claude, tolerance=spec.tolerance)
+    scope_mask = masks.intersect(segment.evaluate(plan, overlay, backends), cutout)
+    if masks.coverage(scope_mask) < 1e-5:
+        return (
+            masks.zeros((base.height, base.width)),
+            f"Nothing in the overlay matched '{what}', so the fade was left off.",
+        )
+
+    carrier = np.zeros((overlay.height, overlay.width, 4), dtype=np.uint8)
+    carrier[:, :, 3] = np.clip(scope_mask * 255.0 + 0.5, 0, 255).astype(np.uint8)
+    placed = pattern.place(
+        carrier, base.size, box, spec.placement, info, target_dpi=base.effective_dpi[0]
+    )
+    return placed[:, :, 3].astype(np.float32) / 255.0, None
 
 
 def _blend_over(base_rgba: np.ndarray, layer_rgba: np.ndarray, mode: str) -> np.ndarray:

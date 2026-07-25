@@ -139,6 +139,14 @@ button.ghost {
 button.ghost:hover { color: var(--text); border-color: var(--accent); }
 
 .hint { margin: 0; font-size: 11px; color: var(--muted); }
+.field .hint { margin-top: 2px; }
+.field em.soft { color: var(--muted); font-size: 11px; }
+#fade-body { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+
+.stage-tools { display: flex; align-items: center; gap: 10px; }
+.glass-toggle { gap: 6px; white-space: nowrap; }
+.glass-toggle input[type="color"] { width: 26px; height: 22px; }
+.viewport.on-glass { background-image: none; }
 
 /* --- stage --- */
 .stage { display: flex; flex-direction: column; min-width: 0; }
