@@ -24,7 +24,10 @@ from .raster import (
     px_to_mm,
 )
 
-TARGETS = ("composite", "overlay", "shape-mask", "cutout-mask", "layer-map", "layers")
+TARGETS = (
+    "composite", "overlay", "shape-mask", "cutout-mask",
+    "layer-map", "layers", "glaze-layers",
+)
 
 
 @dataclass
@@ -114,7 +117,36 @@ def _collect_layers(result: ComposeResult, targets: list[str]) -> dict[str, Rast
             layers.update(_layer_map(result))
         elif target == "layers":
             layers.update(_ink_layers(result))
+        elif target == "glaze-layers":
+            layers.update(_glaze_layers(result))
     return layers
+
+
+def _glaze_layers(result: ComposeResult) -> dict[str, Raster]:
+    """One file per glaze pass: which regions get this ink, this many times.
+
+    Pass *k* of an ink covers every region whose recipe asks for at least *k*
+    of it. Where a fade is running, the counts are scaled along its ramp, so
+    layers come off toward the transparent edge.
+    """
+    plan = result.glaze_plan
+    if plan is None or result.coverage is None:
+        return {}
+
+    ramp = result.fade_field
+    out: dict[str, Raster] = {}
+    for ink, index in plan.stack:
+        counts = plan.counts_for(ink)
+        if ramp is not None:
+            counts = np.round(counts * ramp)
+        alpha = result.coverage * (counts >= index).astype(np.float32)
+        if alpha.max() <= 0.001:
+            continue
+        rgba = np.zeros((*alpha.shape, 4), dtype=np.uint8)
+        rgba[:, :, :3] = np.array(ink.rgb, dtype=np.uint8)[None, None, :]
+        rgba[:, :, 3] = np.clip(alpha * 255.0 + 0.5, 0, 255).astype(np.uint8)
+        out[f"glaze{index}-{ink.name.lstrip('#')}"] = Raster(rgba, dpi=result.composite.dpi)
+    return out
 
 
 def _layer_map(result: ComposeResult) -> dict[str, Raster]:
@@ -179,6 +211,9 @@ def _formats_for(spec: ExportSpec, result: ComposeResult) -> dict[str, list[str]
     # Each printed pass is a cut-out, so it needs a format that holds alpha.
     for index in range(1, max(1, result.fade.layers) + 1):
         formats[f"layer{index}of{result.fade.layers}"] = overlay
+    if result.glaze_plan is not None:
+        for ink, index in result.glaze_plan.stack:
+            formats[f"glaze{index}-{ink.name.lstrip('#')}"] = overlay
     return formats
 
 

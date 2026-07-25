@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import base64
 import secrets
+
+import numpy as np
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -20,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .colors import parse_color
-from .compose import ComposeSpec, compose
+from .compose import ComposeSpec, GlazeSpec, compose
 from .export import ExportSpec, export
 from .fade import Fade
 from .pattern import Placement
@@ -107,6 +109,7 @@ def _build_spec(payload: dict[str, Any]) -> ComposeSpec:
     placement_data = payload.get("placement") or {}
     color_data = payload.get("color") or {}
     fade_data = payload.get("fade") or {}
+    glaze_data = payload.get("glaze") or {}
 
     rect = payload.get("target_rect")
     target_rect = None
@@ -150,6 +153,14 @@ def _build_spec(payload: dict[str, Any]) -> ComposeSpec:
             brightness=_float(color_data.get("brightness"), 1.0),
             contrast=_float(color_data.get("contrast"), 1.0),
             invert=bool(color_data.get("invert")),
+        ),
+        glaze=GlazeSpec(
+            enabled=bool(glaze_data.get("enabled")),
+            glass=str(glaze_data.get("glass") or "#ffffff"),
+            palette=str(glaze_data.get("palette") or ""),
+            colours=int(_float(glaze_data.get("colours"), 5.0)),
+            max_per_ink=int(_float(glaze_data.get("max_per_ink"), 3.0)),
+            max_total=int(_float(glaze_data.get("max_total"), 5.0)),
         ),
         fade=Fade(
             mode=str(fade_data.get("mode") or "none"),
@@ -256,6 +267,16 @@ def create_app() -> FastAPI:
 
         # Printing without a white underbase is multiplicative, so it needs a
         # real render rather than compositing over a colour swatch.
+        if result.glaze_plan is not None and result.coverage is not None:
+            from .glaze import render as render_glaze
+
+            glazed = render_glaze(result.glaze_plan, result.coverage, result.glaze_plan.glass)
+            rgba = np.dstack([
+                np.clip(glazed * 255.0 + 0.5, 0, 255).astype(np.uint8),
+                np.full(glazed.shape[:2], 255, dtype=np.uint8),
+            ])
+            images["glazed"] = _data_url(Raster(rgba, dpi=result.composite.dpi))
+
         simulate = payload.get("simulate") or {}
         glass = parse_color(simulate.get("glass")) if simulate.get("glass") else None
         if glass:

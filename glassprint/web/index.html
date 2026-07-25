@@ -334,7 +334,36 @@
     </section>
 
     <section class="card">
-      <h2>7 · Export</h2>
+      <h2>7 · Glaze</h2>
+      <label class="checkbox">
+        <input type="checkbox" id="glaze-on" />
+        <span>Build colours by stacking different inks</span>
+      </label>
+      <p class="hint">Repeating one ink only deepens it. Stacking different inks multiplies
+        different spectra together, which reaches colours a single ink can't — subtractive
+        glazing. Uses the glass colour set above the preview.</p>
+      <div id="glaze-body" hidden>
+        <label class="field">
+          <span>Inks available</span>
+          <input type="text" id="glaze-palette" placeholder="cyan,magenta,yellow" />
+          <span class="hint">Names or hex. Add one close to a colour you can't hit.</span>
+        </label>
+        <div class="row">
+          <label class="field">
+            <span>Colours to solve</span>
+            <input type="number" id="glaze-colours" min="1" max="12" step="1" value="5" />
+          </label>
+          <label class="field">
+            <span>Max passes</span>
+            <input type="number" id="glaze-max-total" min="1" max="8" step="1" value="5" />
+          </label>
+        </div>
+        <div id="glaze-recipes"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>8 · Export</h2>
       <div class="row">
         <label class="field">
           <span>Formats</span>
@@ -357,6 +386,7 @@
             <label><input type="checkbox" value="cutout-mask" /><span>Cut-out mask</span></label>
             <label><input type="checkbox" value="layer-map" /><span>Layer map</span></label>
             <label><input type="checkbox" value="layers" /><span>One file per pass</span></label>
+            <label><input type="checkbox" value="glaze-layers" /><span>Glaze passes</span></label>
           </span>
         </label>
       </div>

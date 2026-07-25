@@ -91,6 +91,13 @@ function buildSpec() {
       invert: $("fade-invert").checked,
       cutoff: Number($("fade-cutoff").value),
     },
+    glaze: {
+      enabled: $("glaze-on").checked,
+      glass: $("glass-color").value,
+      palette: $("glaze-palette").value,
+      colours: num("glaze-colours", 5),
+      max_total: num("glaze-max-total", 5),
+    },
     include_masks: state.view === "shape_mask" || state.view === "cutout_mask",
     // Without a white base the ink is a glaze, which is multiplicative — the
     // server renders it properly rather than us faking it with a blend mode.
@@ -143,7 +150,11 @@ function showView() {
   const data = state.lastPreview;
   if (!data) return;
   // In no-white mode the glaze render replaces the plain composite.
-  const key = state.view === "composite" && data.images.glaze ? "glaze" : state.view;
+  let key = state.view;
+  if (state.view === "composite") {
+    if (data.images.glazed) key = "glazed";
+    else if (data.images.glaze) key = "glaze";
+  }
   const src = data.images[key] || data.images.composite;
   const img = $("preview");
   img.src = src;
@@ -197,6 +208,8 @@ function renderReadout(summary) {
     }
   }
 
+  renderRecipes(summary.glaze);
+
   const notes = (warnings.concat(summary.notes || []))
     .map((n) => `<p class="note">${escapeHtml(n)}</p>`)
     .join("");
@@ -209,6 +222,32 @@ function renderReadout(summary) {
   if (summary.plan_explanation) {
     $("plan-hint").textContent = summary.plan_explanation;
   }
+}
+
+function renderRecipes(glaze) {
+  const box = $("glaze-recipes");
+  if (!glaze) {
+    box.innerHTML = "";
+    return;
+  }
+  const rows = glaze.recipes
+    .map((r) => {
+      const warn = r.reachable ? "" : ' class="unreachable"';
+      return (
+        `<li${warn}><span class="swatch" style="background:${r.target}"></span>` +
+        `<span class="arrow">&rarr;</span>` +
+        `<span class="swatch" style="background:${r.achieved}"></span>` +
+        `<span class="recipe">${escapeHtml(r.recipe)}</span></li>`
+      );
+    })
+    .join("");
+  box.innerHTML =
+    `<p class="hint">${glaze.total_passes} passes: ${escapeHtml(glaze.stack.join(", "))}</p>` +
+    `<ul class="recipes">${rows}</ul>` +
+    (glaze.unreachable.length
+      ? `<p class="note">${glaze.unreachable.length} colour(s) are brighter than the glass ` +
+        "and print darker than asked — only a white base fixes that.</p>"
+      : "");
 }
 
 function escapeHtml(text) {
@@ -403,6 +442,7 @@ function updateLabels() {
   $("fade-halftone-value").textContent = pitch > 0 ? `${pitch.toFixed(2)} mm` : "off";
   $("fade-halftone-angle-value").textContent = `${$("fade-halftone-angle").value}°`;
 
+  $("glaze-body").hidden = !$("glaze-on").checked;
   $("fade-body").hidden = state.fadeMode === "none";
   $("fade-angle-field").hidden = state.fadeMode !== "linear";
   $("fade-center-row").hidden = state.fadeMode !== "radial";
@@ -494,7 +534,7 @@ function init() {
     "fade-what", "fade-angle", "fade-start", "fade-end", "fade-curve", "fade-dissolve",
     "fade-min", "fade-max", "fade-center-x", "fade-center-y", "fade-cutoff",
     "fade-per-element", "fade-invert", "fade-seed", "fade-halftone", "fade-halftone-angle",
-    "fade-layers",
+    "fade-layers", "glaze-on", "glaze-palette", "glaze-colours", "glaze-max-total",
   ]);
 
   $("glass-on").addEventListener("change", applyGlassBackdrop);

@@ -241,8 +241,9 @@ keeps winning no matter how many passes — pale pink goes from 1.7× dominance 
 one layer to 1.9× at five. Pale yellow on green glass still reads green at five
 passes.
 
-So stacking buys back **saturation and hue, not lightness** — and every pass
-costs brightness. The practical read: printing without white on coloured glass
+So stacking one ink buys back **saturation and hue, not lightness** — and every
+pass costs brightness. (To move a colour *sideways* rather than just deepen it,
+see glazing below.) The practical read: printing without white on coloured glass
 wants a saturated, dark palette. That is the stained-glass discipline. Pale
 tints are what white ink is actually for.
 
@@ -329,6 +330,63 @@ A fade-to-transparent cannot be judged against a checkerboard. Tick **On glass**
 above the preview and set the colour of the glass you're printing on — the
 preview then sits on that colour, which is what the finished piece will look
 like. It changes the preview only, never the exported files.
+
+## Glazing: building colours from different inks
+
+Repeating one ink only ever amplifies its own spectral shape (`ink ** n`), so it
+deepens a colour but cannot move it sideways. Stacking *different* inks
+multiplies different shapes together, which reaches colours a single ink can't.
+That is glazing — and on tinted glass it is really a colour separation where the
+paper happens to be green.
+
+The maths is linear once you take logs. Transmittances multiply, so absorbances
+add:
+
+```
+result = glass · ink₁^n₁ · ink₂^n₂ · …          →     a_result = a_glass + n₁·a₁ + n₂·a₂ + …
+```
+
+Finding a recipe is then "which whole numbers of passes add up to the absorbance
+I still need", which is small enough to solve exactly.
+
+```bash
+glassprint glaze pattern.png --glass "#7d9b8f" --keep "remove the white background"
+```
+
+```
+pattern.png on #7d9b8f glass
+  palette: cyan, magenta, yellow
+  printing plan: 5 passes — cyan #1, magenta #1, yellow #1, yellow #2, yellow #3
+
+  #1e3782 -> #004169   3x cyan
+  #1e502d -> #12630d   cyan + yellow
+! #b22d28 -> #6b140a   magenta + yellow
+    Brighter than the glass in red, so no stack reaches it — ink only removes
+    light. Aimed at the same colour at 61% brightness…
+```
+
+On deep colours glazing beats repeating one ink comfortably — a deep blue on
+green glass lands nearly twice as close.
+
+![the glaze panel, showing each colour's recipe](docs/glaze.png)
+
+**When a colour is out of reach**, the tool aims at the same hue dimmed until it
+fits under the glass, and says by how much. That is far more useful than the
+literal nearest colour, which for a too-bright target is "print nothing".
+
+**The palette is the lever.** `--palette cyan,magenta,yellow,#c98d9b` adds your
+own ink; if a colour keeps missing, an ink near it fixes it instantly. Names or
+hex, any number of them.
+
+Use it in the pipeline with `--glaze --glass "#7d9b8f"`, and
+`--export glaze-layers` writes one file per pass — cyan #1, magenta #1, yellow
+#1… each at full strength, masked to the regions whose recipe calls for it. **A
+fade scales the pass counts along its ramp**, so layers come off toward the
+transparent edge, which is the layered gradient applied to a glaze.
+
+> The process-ink transmittances built in are nominal. If you can measure your
+> own inks on clear glass, put those hex values in `--palette` and every recipe
+> gets more accurate.
 
 ## Export
 

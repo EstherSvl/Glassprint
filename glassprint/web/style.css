@@ -188,3 +188,14 @@ button.ghost:hover { color: var(--text); border-color: var(--accent); }
   .panel { border-right: none; border-bottom: 1px solid var(--line); }
   .viewport { min-height: 320px; }
 }
+
+#glaze-body { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.recipes { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.recipes li { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
+.recipes li.unreachable .recipe { color: var(--accent); }
+.recipes .swatch {
+  width: 17px; height: 17px; border-radius: 4px; flex: none;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.18);
+}
+.recipes .arrow { opacity: .5; }
+.recipes .recipe { color: var(--text); }

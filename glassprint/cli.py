@@ -9,7 +9,8 @@ from typing import Optional
 import typer
 
 from . import __version__
-from .compose import ComposeSpec, compose
+from .colors import parse_color
+from .compose import ComposeSpec, GlazeSpec, compose
 from .export import ExportSpec, export
 from .fade import Fade
 from .nl import build_plan
@@ -140,6 +141,10 @@ def compose_command(
     height_mm: Optional[float] = typer.Option(None, "--height-mm", help="Printed height on the glass."),
     quality: int = typer.Option(95, "--quality", help="JPEG/WebP quality."),
     background: str = typer.Option("#ffffff", "--background", help="Flatten colour for opaque formats."),
+    glaze_on: bool = typer.Option(False, "--glaze", help="Build colours by stacking different inks."),
+    glass: str = typer.Option("#ffffff", "--glass", help="Colour of the glass, for glazing and preview."),
+    glaze_palette: str = typer.Option("", "--palette", help="Inks to glaze with."),
+    glaze_colours: int = typer.Option(5, "--glaze-colours"),
     tolerance: float = typer.Option(1.0, "--tolerance"),
     claude: bool = typer.Option(False, "--claude", help="Use Claude to interpret instructions."),
     json_out: bool = typer.Option(False, "--json", help="Print the manifest as JSON."),
@@ -201,6 +206,12 @@ def compose_command(
             invert=fade_invert,
             cutoff=fade_cutoff,
         ),
+        glaze=GlazeSpec(
+            enabled=glaze_on,
+            glass=glass,
+            palette=glaze_palette,
+            colours=glaze_colours,
+        ),
     )
 
     backends = Backends()
@@ -248,6 +259,54 @@ def compose_command(
             f"@ {entry['dpi']}dpi  ({size[0]} x {size[1]} mm)"
         )
     _echo_notes(result.notes)
+
+
+@app.command()
+def glaze(
+    artwork: Path = typer.Argument(..., exists=True, dir_okay=False),
+    glass: str = typer.Option("#ffffff", "--glass", help="Colour of the glass you are printing on."),
+    palette: str = typer.Option("", "--palette", help="Inks to glaze with, e.g. cyan,magenta,yellow,#7a2f8a"),
+    colours: int = typer.Option(5, "--colours", help="How many of the artwork's colours to solve for."),
+    max_per_ink: int = typer.Option(3, "--max-per-ink"),
+    max_total: int = typer.Option(5, "--max-total"),
+    keep: str = typer.Option("", "--keep", "-k", help="What to keep from the artwork first."),
+) -> None:
+    """Work out how to build the artwork's colours from stacked ink on tinted glass."""
+    from .colors import to_hex
+    from .glaze import palette_from, plan as build_plan_for_glaze
+    from .pattern import apply_cutout
+    from .segment import evaluate
+
+    raster = Raster.open(artwork)
+    backends = Backends()
+    cutout = evaluate(build_plan(keep, raster), raster, backends)
+    art = apply_cutout(raster, cutout)
+
+    glass_rgb = parse_color(glass) or (255, 255, 255)
+    result = build_plan_for_glaze(
+        art[:, :, :3].astype("float32") / 255.0,
+        cutout,
+        glass_rgb,
+        palette_from(palette),
+        colours=colours,
+        max_per_ink=max_per_ink,
+        max_total=max_total,
+    )
+
+    typer.echo(f"{artwork.name} on {to_hex(glass_rgb)} glass")
+    typer.echo(f"  palette: {', '.join(ink.name for ink in result.palette)}")
+    typer.echo(f"  printing plan: {len(result.stack)} passes — " +
+               ", ".join(f"{ink.name} #{i}" for ink, i in result.stack))
+    typer.echo("")
+    for recipe in result.recipes:
+        mark = " " if recipe.reachable else "!"
+        typer.echo(
+            f" {mark} {to_hex(recipe.target)} -> {to_hex(recipe.achieved)}"
+            f"   {recipe.describe()}"
+        )
+        if recipe.note:
+            typer.secho(f"     {recipe.note}", fg=typer.colors.YELLOW)
+    _echo_notes(backends.notes)
 
 
 @app.command()

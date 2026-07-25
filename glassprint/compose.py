@@ -12,8 +12,10 @@ import numpy as np
 from scipy import ndimage
 
 from . import fade as fade_module
+from .colors import parse_color, to_hex
 from . import masks, nl, pattern, recolor, segment
 from .fade import Fade
+from .glaze import GlazePlan, palette_from, plan as glaze_plan_for
 from .pattern import Box, PatternInfo, Placement
 from .raster import MM_PER_INCH, Raster
 from .recolor import ColorSpec
@@ -21,6 +23,18 @@ from .segment import Backends, MaskPlan
 
 TARGET_MODES = ("alpha", "describe", "largest", "full", "rect")
 BLEND_MODES = ("normal", "multiply", "screen", "overlay")
+
+
+@dataclass
+class GlazeSpec:
+    """Build the artwork's colours by stacking layers of different ink."""
+
+    enabled: bool = False
+    glass: str = "#ffffff"
+    palette: str = ""          # "cyan,magenta,yellow" or hex values
+    colours: int = 5           # how many of the artwork's colours to solve for
+    max_per_ink: int = 3
+    max_total: int = 5
 
 
 @dataclass
@@ -46,6 +60,7 @@ class ComposeSpec:
     placement: Placement = field(default_factory=Placement)
     color: ColorSpec = field(default_factory=ColorSpec)
     fade: Fade = field(default_factory=Fade)
+    glaze: GlazeSpec = field(default_factory=lambda: GlazeSpec())
 
     def validated(self) -> "ComposeSpec":
         if self.target not in TARGET_MODES:
@@ -74,6 +89,10 @@ class ComposeResult:
     layer_map: np.ndarray | None = None
     #: Artwork coverage ignoring the layer stepping — what one pass lays down.
     coverage: np.ndarray | None = None
+    #: The fade's opacity ramp, so glaze passes can be dropped along it.
+    fade_field: np.ndarray | None = None
+    #: Per-colour glaze recipes, when glazing is on.
+    glaze_plan: "GlazePlan | None" = None
     notes: list[str] = field(default_factory=list)
 
     def faintest_alpha(self) -> float:
@@ -119,6 +138,7 @@ class ComposeResult:
                 # 0.12 the printer's dither starts to break up.
                 "faintest_alpha": self.faintest_alpha(),
             },
+            "glaze": self.glaze_plan.as_dict() if self.glaze_plan else None,
             "notes": self.notes,
         }
 
@@ -239,6 +259,7 @@ def compose(
     layer_alpha = placed[:, :, 3].astype(np.float32) / 255.0
     faded_elements = 0
     layer_map: np.ndarray | None = None
+    fade_field: np.ndarray | None = None
 
     if spec.fade.active:
         opacity_field = fade_module.ramp(
@@ -263,6 +284,7 @@ def compose(
         layer_alpha, faded_elements = fade_module.apply(
             layer_alpha, opacity_field, element_spec, scope
         )
+        fade_field = opacity_field
 
     # What a single printed pass lays down, before the layer stepping. With a
     # stacked fade this is the shape of every pass; the layer map says how many
@@ -282,6 +304,22 @@ def compose(
     overlay_layer[:, :, 3] = np.clip(layer_alpha * 255.0 + 0.5, 0, 255).astype(np.uint8)
     faintest = _faintest_ink(placed, layer_alpha, shaped if spec.clip_to_shape else None)
 
+    plan_ = None
+    if spec.glaze.enabled:
+        glass = parse_color(spec.glaze.glass) or (255, 255, 255)
+        plan_ = glaze_plan_for(
+            overlay_layer[:, :, :3].astype(np.float32) / 255.0,
+            coverage,
+            glass,
+            palette_from(spec.glaze.palette),
+            colours=spec.glaze.colours,
+            max_per_ink=spec.glaze.max_per_ink,
+            max_total=spec.glaze.max_total,
+        )
+        for recipe in plan_.recipes:
+            if recipe.note:
+                notes.append(f"Glaze — {to_hex(recipe.target)}: {recipe.note}")
+
     # 5. Blend over the base.
     composite = _blend_over(base.rgba, overlay_layer, spec.blend)
 
@@ -300,6 +338,8 @@ def compose(
         faintest_ink=faintest,
         layer_map=layer_map,
         coverage=coverage,
+        fade_field=fade_field,
+        glaze_plan=plan_,
         notes=notes,
     )
 
