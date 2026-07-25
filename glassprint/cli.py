@@ -309,25 +309,63 @@ def glaze(
     _echo_notes(backends.notes)
 
 
+def _lan_address() -> str | None:
+    """This machine's address on the local network, for tablets and phones."""
+    import socket
+
+    try:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        probe.settimeout(0.2)
+        # Nothing is actually sent; this just asks the OS which interface it
+        # would route out of.
+        probe.connect(("192.168.255.255", 1))
+        address = probe.getsockname()[0]
+        probe.close()
+        return address if not address.startswith("127.") else None
+    except OSError:
+        return None
+
+
 @app.command()
 def serve(
     host: str = typer.Option("127.0.0.1", "--host"),
     port: int = typer.Option(8765, "--port"),
     open_browser: bool = typer.Option(True, "--open/--no-open", help="Open a browser window."),
+    lan: bool = typer.Option(
+        False, "--lan", help="Also accept connections from other devices on your network."
+    ),
 ) -> None:
     """Run the local web interface."""
     import uvicorn
 
     from .server import create_app
 
-    url = f"http://{host}:{port}/"
+    bind = "0.0.0.0" if lan else host
+    url = f"http://{'127.0.0.1' if lan else host}:{port}/"
     typer.secho(f"glassprint running at {url}", fg=typer.colors.GREEN)
+
+    if lan:
+        address = _lan_address()
+        if address:
+            typer.secho(
+                f"On your iPad or phone, open:  http://{address}:{port}/",
+                fg=typer.colors.CYAN,
+                bold=True,
+            )
+            typer.echo("  (same Wi-Fi network, and leave this window open)")
+        else:
+            typer.secho(
+                "Could not work out this machine's network address — check Wi-Fi is on.",
+                fg=typer.colors.YELLOW,
+            )
+
+    typer.echo("Press Ctrl+C to stop.")
     if open_browser:
         import threading
         import webbrowser
 
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
-    uvicorn.run(create_app(), host=host, port=port, log_level="warning")
+    uvicorn.run(create_app(), host=bind, port=port, log_level="warning")
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -2,6 +2,10 @@
 
 const $ = (id) => document.getElementById(id);
 
+/* The page picks a backend before app.js runs: the local Python server on a
+ * desktop, or Python inside this tab on a tablet. */
+const backend = () => window.GlassprintBackend || window.GlassprintBackends.HttpBackend;
+
 const state = {
   sessionId: null,
   images: {},
@@ -125,15 +129,8 @@ async function runPreview() {
   setStatus("rendering…", "busy");
 
   try {
-    const response = await fetch("/api/preview", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildSpec()),
-      signal: controller.signal,
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || "preview failed");
-
+    const data = await backend().preview(buildSpec(), controller.signal);
+    state.sessionId = data.session_id || state.sessionId;
     state.lastPreview = data;
     showView();
     renderReadout(data.summary);
@@ -256,19 +253,21 @@ function escapeHtml(text) {
 
 /* ------------------------------------------------------------------ uploads */
 
-async function upload(file, role) {
-  const form = new FormData();
-  form.append("file", file);
-  form.append("role", role);
-  if (state.sessionId) form.append("session_id", state.sessionId);
+/* Uploads run one after another. Dropping a base and an overlay together used
+ * to start both at once, and with no session id yet each one opened its own —
+ * so the preview then found only half its images. */
+let uploadQueue = Promise.resolve();
 
+function upload(file, role) {
+  uploadQueue = uploadQueue.then(() => uploadOne(file, role));
+  return uploadQueue;
+}
+
+async function uploadOne(file, role) {
   setStatus(`loading ${role}…`, "busy");
   try {
-    const response = await fetch("/api/upload", { method: "POST", body: form });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || "upload failed");
-
-    state.sessionId = data.session_id;
+    const data = await backend().upload(file, role, state.sessionId);
+    state.sessionId = data.session_id || state.sessionId;
     state.images[role] = data.image;
     describeImage(role, data.image);
 
@@ -341,24 +340,27 @@ async function runExport() {
   };
 
   try {
-    const response = await fetch("/api/export", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || "export failed");
+    const data = await backend().export(payload);
 
     const items = data.files
-      .map(
-        (f) =>
-          `<li><a href="${f.download}" download>${escapeHtml(f.file)}</a> — ` +
+      .map((f) => {
+        const detail =
           `${f.pixels[0]}×${f.pixels[1]} px @ ${f.dpi} dpi · ${f.size_mm[0]}×${f.size_mm[1]} mm` +
-          `${f.alpha ? " · transparent" : ""}</li>`
-      )
+          `${f.alpha ? " · transparent" : ""}`;
+        // Without a server there is no per-file link — the zip is the delivery.
+        const label = f.download
+          ? `<a href="${f.download}" download>${escapeHtml(f.file)}</a>`
+          : escapeHtml(f.file);
+        return f.pixels[0] ? `<li>${label} — ${detail}</li>` : `<li>${label}</li>`;
+      })
       .join("");
-    $("export-result").innerHTML =
-      `<p class="path">Written to ${escapeHtml(data.directory)}</p><ul>${items}</ul>`;
+
+    const heading = data.bundle
+      ? `<p class="path"><a class="bundle" href="${data.bundle.download}" download="${escapeHtml(
+          data.bundle.file
+        )}">Save ${escapeHtml(data.bundle.file)}</a> — then unzip it in Files</p>`
+      : `<p class="path">Written to ${escapeHtml(data.directory)}</p>`;
+    $("export-result").innerHTML = heading + `<ul>${items}</ul>`;
     setStatus(`exported ${data.files.length} file${data.files.length === 1 ? "" : "s"}`);
   } catch (error) {
     $("export-result").innerHTML = "";
@@ -484,20 +486,28 @@ function linkColor(pickerId, hexId) {
 
 async function loadCapabilities() {
   try {
-    const response = await fetch("/api/capabilities");
-    const data = await response.json();
+    const data = await backend().capabilities();
     state.capabilities = data;
-    $("export-dir").value = data.default_export_dir;
     $("claude-row").hidden = !data.claude;
+
+    // With no server there is nowhere on disk to write to, so the folder field
+    // goes away and the export arrives as a download instead.
+    const writesFiles = data.writes_files !== false;
+    $("export-dir-row").hidden = !writesFiles;
+    if (writesFiles) $("export-dir").value = data.default_export_dir || "";
 
     const bits = [];
     bits.push(data.semantic_selection ? "object selection on" : "colour/tone selection");
     if (data.subject_cutout) bits.push("subject cutout on");
     if (data.claude) bits.push("Claude available");
+    if (!writesFiles) bits.push("running in this tab");
     $("tagline").textContent = `v${data.version} · ${bits.join(" · ")}`;
     setStatus("ready");
-  } catch {
-    setStatus("could not reach the local server", "error");
+  } catch (error) {
+    setStatus(
+      backend().name === "http" ? "could not reach the local server" : error.message,
+      "error"
+    );
   }
 }
 
@@ -560,4 +570,7 @@ function init() {
   loadCapabilities();
 }
 
-init();
+// The browser build has to finish starting Python before any of this is
+// answerable, so it calls init() itself once that is done.
+window.glassprintInit = init;
+if (!window.GlassprintBackend) init();

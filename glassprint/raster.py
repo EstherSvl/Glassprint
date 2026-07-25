@@ -192,18 +192,21 @@ class Raster:
 
     # -- output -------------------------------------------------------------
 
-    def save(
+    def encode(
         self,
-        path: str | Path,
         *,
-        fmt: str | None = None,
+        fmt: str = "png",
         dpi: tuple[float, float] | None = None,
         quality: int = 95,
         background: tuple[int, int, int] = (255, 255, 255),
         keep_alpha: bool = True,
-    ) -> Path:
-        path = Path(path)
-        fmt = normalise_format(fmt or path.suffix or "png")
+    ) -> bytes:
+        """Encode to a file's worth of bytes without touching the disk.
+
+        The browser build has no filesystem to write to, so encoding and
+        writing are separate steps and both callers share this one.
+        """
+        fmt = normalise_format(fmt)
         pil_format = WRITE_FORMATS[fmt]
         out_dpi = dpi or self.effective_dpi
 
@@ -224,8 +227,30 @@ class Raster:
         elif pil_format == "PNG":
             params.update(optimize=True)
 
+        buf = io.BytesIO()
+        image.save(buf, format=pil_format, **params)
+        return buf.getvalue()
+
+    def save(
+        self,
+        path: str | Path,
+        *,
+        fmt: str | None = None,
+        dpi: tuple[float, float] | None = None,
+        quality: int = 95,
+        background: tuple[int, int, int] = (255, 255, 255),
+        keep_alpha: bool = True,
+    ) -> Path:
+        path = Path(path)
+        data = self.encode(
+            fmt=fmt or path.suffix or "png",
+            dpi=dpi,
+            quality=quality,
+            background=background,
+            keep_alpha=keep_alpha,
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
-        image.save(path, format=pil_format, **params)
+        path.write_bytes(data)
         return path
 
     def to_png_bytes(self) -> bytes:

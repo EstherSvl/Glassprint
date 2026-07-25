@@ -47,6 +47,52 @@ Opens `http://127.0.0.1:8765`. Drop in a base image and an overlay, type what to
 keep, and the preview updates as you move the sliders. Export when it looks
 right.
 
+### On an iPad
+
+There are two ways, and which one suits depends on whether a computer is nearby.
+Either way the layout folds to one column and pins the preview to the top, so it
+stays in sight while you scroll the controls under it.
+
+<img src="docs/ipad.png" alt="the interface on an iPad, held upright" width="420" />
+
+**If a Mac or PC is on the same Wi-Fi**, start the server with `--lan`:
+
+```bash
+glassprint serve --lan
+```
+
+It prints a second address — something like `http://192.168.1.24:8765/`. Type
+that into Safari on the tablet and you get the full interface, with the computer
+doing the work. Exports land in the folder on the computer.
+
+Nothing needs typing on the computer either: double-click
+**`launchers/Start glassprint (Mac).command`** (or the `.bat` on Windows). The
+first run installs everything, and every run after that just starts the server
+and prints the address.
+
+**If there is no computer involved**, use the single-file build:
+`dist/glassprint.html`. It carries the whole tool inside it and runs Python in
+the browser tab, so the iPad does the work itself. Put it anywhere that serves
+files over `https` — GitHub Pages, a folder on your own site — and open the URL.
+
+The first visit downloads the Python runtime and its imaging libraries, around
+40 MB, which the browser then keeps. After that it works with no network at all.
+It has to be *served*, though: opening the file directly from the Files app does
+not reliably work, because browsers refuse to load a runtime into a page that
+came from the filesystem.
+
+Two differences from the desktop version, both because a browser tab has no
+folder to write into:
+
+- The export arrives as a single `.zip` you save to Files and unzip there. That
+  is also the nicer way round when a glaze runs to a dozen passes.
+- The optional `smart` extras and the Claude integration are not available —
+  they need a local install. Colour, tone, background and subject selection all
+  work exactly as they do on the desktop.
+
+Rebuild it after changing anything with `python tools/build_standalone.py`; a
+test fails if the committed file has fallen behind.
+
 ### The command line
 
 ```bash
@@ -66,6 +112,7 @@ Other commands:
 | `glassprint mask art.png --keep "..."` | Writes just the cut-out, to check the mask before composing |
 | `glassprint compose base art -o out/` | The full pipeline |
 | `glassprint serve` | The web interface |
+| `glassprint serve --lan` | The same, reachable from a tablet on the same Wi-Fi |
 | `glassprint version` | Version and which optional backends are installed |
 
 ---
@@ -511,5 +558,21 @@ The layout:
 | `pattern.py` | Pattern detection, tiling and placement |
 | `recolor.py` | Colour treatments |
 | `compose.py` | The pipeline that ties it together |
+| `fade.py` | The fade ramp and its four renderings |
+| `glaze.py` | Solving a colour as a stack of different inks |
+| `simulate.py` | What the ink looks like on coloured glass |
 | `export.py` | Output formats, DPI, physical size |
+| `bridge.py` | The interface's work, with no opinion about transport |
 | `cli.py` / `server.py` | The two front ends |
+
+`bridge.py` is what makes the browser build possible: everything between "here
+is an image and some settings" and "here are the pictures and files" lives
+there, so `server.py` is a thin HTTP shell over it and the tablet calls the very
+same code with no server at all. `tools/build_standalone.py` folds the page and
+the package into `dist/glassprint.html`.
+
+The one thing the test suite cannot reach is the browser build actually running
+numpy, scipy and Pillow under WebAssembly — that needs a real download of the
+Pyodide wheels. What *is* covered: the JSON interface the tablet drives
+(`test_bridge.py`), the build being in step with its sources, and the export
+arriving as a readable zip (`test_standalone.py`).

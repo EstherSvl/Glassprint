@@ -3,7 +3,10 @@ __pycache__/
 *.pyc
 *.egg-info/
 build/
-dist/
+# Wheels and tarballs, but not the browser build — that one is meant to be
+# committed, so it can be hosted without anyone running a build first.
+dist/*
+!dist/glassprint.html
 .pytest_cache/
 .glassprint/
 out/

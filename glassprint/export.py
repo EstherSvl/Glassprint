@@ -7,6 +7,7 @@ are resampled together so the overlay stays registered to the composite.
 
 from __future__ import annotations
 
+import io
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -56,12 +57,14 @@ class ExportSpec:
         return self
 
 
-def export(result: ComposeResult, out_dir: str | Path, spec: ExportSpec | None = None) -> list[dict]:
-    """Write the requested files and return a manifest describing each one."""
-    spec = (spec or ExportSpec()).validated()
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+def render(result: ComposeResult, spec: ExportSpec | None = None) -> list[dict]:
+    """Encode every requested file in memory and return a manifest.
 
+    Each entry carries its bytes under ``data``. Writing them out is a separate
+    step, because the browser build hands them to the download bar instead of a
+    directory.
+    """
+    spec = (spec or ExportSpec()).validated()
     basename = spec.basename or result.base.name or "glassprint"
     dpi = spec.dpi or result.base.effective_dpi[0]
     background = parse_color(spec.background) or (255, 255, 255)
@@ -70,27 +73,24 @@ def export(result: ComposeResult, out_dir: str | Path, spec: ExportSpec | None =
     layers = {name: _resize_for_output(layer, spec, dpi) for name, layer in layers.items()}
 
     formats = _formats_for(spec, result)
-    written: list[dict] = []
+    rendered: list[dict] = []
 
     for name, layer in layers.items():
         wants_alpha = name != "composite" or result.base.has_alpha
         for fmt in formats.get(name, spec.formats):
             suffix = "jpg" if fmt in ("jpg", "jpeg") else fmt
-            path = out_dir / f"{basename}_{name}.{suffix}"
-            layer.save(
-                path,
-                fmt=fmt,
-                dpi=(dpi, dpi),
-                quality=spec.quality,
-                background=background,
-                keep_alpha=wants_alpha,
-            )
-            written.append(
+            rendered.append(
                 {
-                    "path": str(path),
-                    "file": path.name,
+                    "file": f"{basename}_{name}.{suffix}",
                     "target": name,
                     "format": fmt,
+                    "data": layer.encode(
+                        fmt=fmt,
+                        dpi=(dpi, dpi),
+                        quality=spec.quality,
+                        background=background,
+                        keep_alpha=wants_alpha,
+                    ),
                     "alpha": bool(wants_alpha and fmt in ALPHA_FORMATS),
                     "pixels": [layer.width, layer.height],
                     "dpi": round(dpi, 2),
@@ -102,9 +102,51 @@ def export(result: ComposeResult, out_dir: str | Path, spec: ExportSpec | None =
             )
 
     if "print-order" in spec.targets:
-        sheet = write_print_order(result, out_dir, basename, written)
+        sheet = print_order_text(result, basename, rendered)
         if sheet:
-            written.append(sheet)
+            rendered.append(
+                {
+                    "file": f"{basename}_print-order.md",
+                    "target": "print-order",
+                    "format": "md",
+                    "data": sheet.encode("utf-8"),
+                    "alpha": False,
+                    "pixels": [0, 0],
+                    "dpi": 0,
+                    "size_mm": [0, 0],
+                }
+            )
+    return rendered
+
+
+def bundle(entries: list[dict], name: str = "glassprint") -> bytes:
+    """Everything in one zip.
+
+    A glaze can run to a dozen passes plus a print-order sheet. On a tablet,
+    saving those one at a time is its own small ordeal, so the browser build
+    offers the whole export as a single file instead.
+    """
+    import zipfile
+
+    buf = io.BytesIO()
+    # Stored, not deflated: PNGs are already compressed, and this keeps the
+    # zip quick to build on a tablet.
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as archive:
+        for entry in entries:
+            archive.writestr(f"{name}/{entry['file']}", entry["data"])
+    return buf.getvalue()
+
+
+def export(result: ComposeResult, out_dir: str | Path, spec: ExportSpec | None = None) -> list[dict]:
+    """Write the requested files and return a manifest describing each one."""
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    written = []
+    for entry in render(result, spec):
+        path = out_dir / entry["file"]
+        path.write_bytes(entry.pop("data"))
+        written.append({"path": str(path), **entry})
     return written
 
 
@@ -229,7 +271,7 @@ def _formats_for(spec: ExportSpec, result: ComposeResult) -> dict[str, list[str]
     return formats
 
 
-def write_print_order(result: ComposeResult, out_dir: Path, basename: str, written: list[dict]) -> dict | None:
+def print_order_text(result: ComposeResult, basename: str, written: list[dict]) -> str | None:
     """A sheet telling you what to print, in what order, and what to watch for.
 
     Printing a glaze means feeding the machine one pass at a time, so the thing
@@ -287,18 +329,7 @@ def write_print_order(result: ComposeResult, out_dir: Path, basename: str, writt
                 "only a white base could give them the brightness.",
             ]
 
-    path = out_dir / f"{basename}_print-order.md"
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return {
-        "path": str(path),
-        "file": path.name,
-        "target": "print-order",
-        "format": "md",
-        "alpha": False,
-        "pixels": [0, 0],
-        "dpi": 0,
-        "size_mm": [0, 0],
-    }
+    return "\n".join(lines) + "\n"
 
 
 def _resize_for_output(layer: Raster, spec: ExportSpec, dpi: float) -> Raster:
