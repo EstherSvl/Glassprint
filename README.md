@@ -174,12 +174,20 @@ wrote panel_overlay.png    2126x1594px @ 300.0dpi  (180.0 x 135.0 mm)
 
 ### A note on the EufyMake workflow
 
-These exports are flat RGB/RGBA files at a known physical size, which is what the
-EufyMake software wants for a standard colour pass. Two things it does *not* do,
-because you didn't ask for them: generate a separate white-ink underbase layer,
-and generate a gloss/texture height map. Both are straightforward additions to
-`export.py` if you decide you want them — the shape mask export is already
-most of an underbase, minus the choke.
+These exports are flat RGB/RGBA files at a known physical size, which is what
+eufyMake Studio takes. The white underbase and the gloss/texture passes are
+generated in Studio from the imported artwork, so there is deliberately no
+separations export here — you'd only be feeding it files it makes itself.
+
+What that does mean is that **the alpha channel drives the white layer**, so the
+cut-out quality is the thing to watch:
+
+- Keep the edge feather modest (1–2 px at 300 dpi). It softens jagged curves,
+  which is what you want. A wide feather leaves a band where colour is dense but
+  white ink is thin, which reads as a washed-out halo over clear glass.
+- Stray low-alpha pixels left around a cut-out become faint white ink. Export or
+  preview the `cutout-mask` to see exactly what will drive the underbase before
+  committing a print.
 
 ## Using it as a library
 
