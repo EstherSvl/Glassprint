@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "glassprint"
+version = "0.1.0"
+description = "Overlay background-removed artwork onto a base image and prepare it for UV printing on glass"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "pillow>=10.0",
+    "scipy>=1.10",
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "python-multipart>=0.0.9",
+    "typer>=0.12",
+]
+
+[project.optional-dependencies]
+# Local models for text-driven ("keep the flowers") masking.
+smart = [
+    "rembg>=2.0.50",
+    "onnxruntime>=1.17",
+    "transformers>=4.40",
+    "torch>=2.2",
+]
+# Optional: use Claude to interpret trickier phrasing.
+claude = ["anthropic>=0.40"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+glassprint = "glassprint.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["glassprint*"]
+
+[tool.setuptools.package-data]
+glassprint = ["web/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

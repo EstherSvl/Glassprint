@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>glassprint</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23c9a227'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%2314161a'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="mark"></span>
+    <div>
+      <h1>glassprint</h1>
+      <p id="tagline">overlay artwork onto a base image, ready for the printer</p>
+    </div>
+  </div>
+  <div class="status" id="status">loading…</div>
+</header>
+
+<main>
+  <aside class="panel" id="controls">
+
+    <section class="card">
+      <h2>1 · Images</h2>
+      <div class="drops">
+        <label class="drop" id="drop-base">
+          <input type="file" id="file-base" accept="image/*,.psd" hidden />
+          <div class="drop-inner">
+            <img class="thumb" id="thumb-base" alt="" hidden />
+            <div class="drop-label">
+              <strong>Base image</strong>
+              <span id="meta-base">Procreate / Affinity export — drop it here</span>
+            </div>
+          </div>
+        </label>
+        <label class="drop" id="drop-overlay">
+          <input type="file" id="file-overlay" accept="image/*,.psd" hidden />
+          <div class="drop-inner">
+            <img class="thumb" id="thumb-overlay" alt="" hidden />
+            <div class="drop-label">
+              <strong>Overlay</strong>
+              <span id="meta-overlay">pattern or motif — drop it here</span>
+            </div>
+          </div>
+        </label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>2 · What to keep from the overlay</h2>
+      <textarea id="keep" rows="2" placeholder="keep the flowers, remove the white background"></textarea>
+      <p class="hint" id="plan-hint">Leave empty to just drop the background.</p>
+      <div class="row">
+        <label class="field">
+          <span>Match tolerance</span>
+          <input type="range" id="tolerance" min="0.3" max="2.5" step="0.1" value="1" />
+        </label>
+        <label class="checkbox" id="claude-row" hidden>
+          <input type="checkbox" id="use-claude" />
+          <span>Use Claude to read the instruction</span>
+        </label>
+      </div>
+      <label class="field">
+        <span>Soften cut edge <em id="edge-feather-value">0 px</em></span>
+        <input type="range" id="edge-feather" min="0" max="8" step="0.5" value="0" />
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>3 · Where it goes</h2>
+      <div class="segmented" id="target-modes">
+        <button type="button" data-value="alpha" class="active">Shape</button>
+        <button type="button" data-value="describe">Describe</button>
+        <button type="button" data-value="largest">Largest area</button>
+        <button type="button" data-value="full">Whole canvas</button>
+      </div>
+      <input type="text" id="target-describe" placeholder="e.g. the vase body, not the handle" hidden />
+      <label class="checkbox">
+        <input type="checkbox" id="clip" checked />
+        <span>Clip to the shape</span>
+      </label>
+      <div class="row">
+        <label class="field">
+          <span>Shape edge <em id="shape-feather-value">0 px</em></span>
+          <input type="range" id="shape-feather" min="0" max="12" step="0.5" value="0" />
+        </label>
+        <label class="field">
+          <span>Grow / choke <em id="shape-grow-value">0 px</em></span>
+          <input type="range" id="shape-grow" min="-12" max="12" step="1" value="0" />
+        </label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>4 · Size &amp; placement</h2>
+      <div class="row">
+        <label class="field">
+          <span>Fit</span>
+          <select id="fit">
+            <option value="auto">Auto — read the artwork</option>
+            <option value="tile">Tile (repeating pattern)</option>
+            <option value="shape">Fit inside the shape</option>
+            <option value="cover">Cover the shape</option>
+            <option value="stretch">Stretch to fill</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Mirror tiles</span>
+          <select id="mirror">
+            <option value="auto">Auto</option>
+            <option value="on">Always</option>
+            <option value="off">Never</option>
+          </select>
+        </label>
+      </div>
+      <div class="row" id="tile-controls">
+        <label class="field">
+          <span>Repeats across</span>
+          <input type="number" id="repeat-across" min="0.25" step="0.25" placeholder="auto" />
+        </label>
+        <label class="field">
+          <span>Repeat size (mm)</span>
+          <input type="number" id="repeat-mm" min="1" step="1" placeholder="auto" />
+        </label>
+      </div>
+      <label class="field">
+        <span>Scale <em id="scale-value">100%</em></span>
+        <input type="range" id="scale" min="0.1" max="4" step="0.05" value="1" />
+      </label>
+      <label class="field">
+        <span>Rotation <em id="rotation-value">0°</em></span>
+        <input type="range" id="rotation" min="-180" max="180" step="1" value="0" />
+      </label>
+      <div class="row">
+        <label class="field">
+          <span>Nudge across <em id="offset-x-value">0%</em></span>
+          <input type="range" id="offset-x" min="-1" max="1" step="0.01" value="0" />
+        </label>
+        <label class="field">
+          <span>Nudge down <em id="offset-y-value">0%</em></span>
+          <input type="range" id="offset-y" min="-1" max="1" step="0.01" value="0" />
+        </label>
+      </div>
+      <div class="row">
+        <label class="checkbox"><input type="checkbox" id="flip-h" /><span>Flip horizontally</span></label>
+        <label class="checkbox"><input type="checkbox" id="flip-v" /><span>Flip vertically</span></label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>5 · Colour</h2>
+      <div class="row">
+        <label class="field">
+          <span>Treatment</span>
+          <select id="color-mode">
+            <option value="none">Leave as is</option>
+            <option value="tint">Recolour to one colour</option>
+            <option value="duotone">Duotone</option>
+            <option value="replace">Swap one colour</option>
+            <option value="mono">Greyscale</option>
+          </select>
+        </label>
+        <label class="field" id="color-field" hidden>
+          <span id="color-label">Colour</span>
+          <span class="color-input">
+            <input type="color" id="color" value="#c9a227" />
+            <input type="text" id="color-hex" value="#c9a227" spellcheck="false" />
+          </span>
+        </label>
+      </div>
+      <div class="row" id="color2-row" hidden>
+        <label class="field">
+          <span id="color2-label">Shadow colour</span>
+          <span class="color-input">
+            <input type="color" id="color2" value="#101820" />
+            <input type="text" id="color2-hex" value="#101820" spellcheck="false" />
+          </span>
+        </label>
+      </div>
+      <div class="row" id="from-color-row" hidden>
+        <label class="field">
+          <span>Colour to replace</span>
+          <span class="color-input">
+            <input type="color" id="from-color" value="#dc2626" />
+            <input type="text" id="from-color-hex" value="#dc2626" spellcheck="false" />
+          </span>
+        </label>
+      </div>
+      <label class="field" id="strength-field" hidden>
+        <span>Strength <em id="strength-value">100%</em></span>
+        <input type="range" id="strength" min="0" max="1" step="0.05" value="1" />
+      </label>
+      <details>
+        <summary>Fine adjustments</summary>
+        <label class="field">
+          <span>Hue shift <em id="hue-shift-value">0°</em></span>
+          <input type="range" id="hue-shift" min="-180" max="180" step="1" value="0" />
+        </label>
+        <label class="field">
+          <span>Saturation <em id="saturation-value">100%</em></span>
+          <input type="range" id="saturation" min="0" max="2" step="0.05" value="1" />
+        </label>
+        <label class="field">
+          <span>Brightness <em id="brightness-value">100%</em></span>
+          <input type="range" id="brightness" min="0.2" max="2" step="0.05" value="1" />
+        </label>
+        <label class="field">
+          <span>Contrast <em id="contrast-value">100%</em></span>
+          <input type="range" id="contrast" min="0.2" max="2.5" step="0.05" value="1" />
+        </label>
+      </details>
+      <div class="row">
+        <label class="field">
+          <span>Opacity <em id="opacity-value">100%</em></span>
+          <input type="range" id="opacity" min="0" max="1" step="0.05" value="1" />
+        </label>
+        <label class="field">
+          <span>Blend</span>
+          <select id="blend">
+            <option value="normal">Normal</option>
+            <option value="multiply">Multiply</option>
+            <option value="screen">Screen</option>
+            <option value="overlay">Overlay</option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>6 · Export</h2>
+      <div class="row">
+        <label class="field">
+          <span>Formats</span>
+          <span class="chips" id="formats">
+            <label><input type="checkbox" value="png" checked /><span>PNG</span></label>
+            <label><input type="checkbox" value="tiff" /><span>TIFF</span></label>
+            <label><input type="checkbox" value="jpg" /><span>JPEG</span></label>
+            <label><input type="checkbox" value="webp" /><span>WebP</span></label>
+            <label><input type="checkbox" value="bmp" /><span>BMP</span></label>
+          </span>
+        </label>
+      </div>
+      <div class="row">
+        <label class="field">
+          <span>Layers</span>
+          <span class="chips" id="targets">
+            <label><input type="checkbox" value="composite" checked /><span>Base + overlay</span></label>
+            <label><input type="checkbox" value="overlay" checked /><span>Overlay only</span></label>
+            <label><input type="checkbox" value="shape-mask" /><span>Shape mask</span></label>
+            <label><input type="checkbox" value="cutout-mask" /><span>Cut-out mask</span></label>
+          </span>
+        </label>
+      </div>
+      <label class="checkbox">
+        <input type="checkbox" id="include-base-format" checked />
+        <span>Also write the composite in the base image's own format</span>
+      </label>
+      <div class="row">
+        <label class="field">
+          <span>Print DPI</span>
+          <input type="number" id="dpi" min="72" step="1" placeholder="from base" />
+        </label>
+        <label class="field">
+          <span>Printed width (mm)</span>
+          <input type="number" id="width-mm" min="1" step="1" placeholder="keep size" />
+        </label>
+      </div>
+      <label class="field">
+        <span>File name</span>
+        <input type="text" id="basename" placeholder="from the base image" />
+      </label>
+      <label class="field">
+        <span>Save to folder</span>
+        <input type="text" id="export-dir" spellcheck="false" />
+      </label>
+      <button class="primary" id="export-button" disabled>Export</button>
+      <div id="export-result"></div>
+    </section>
+  </aside>
+
+  <section class="stage">
+    <div class="stage-head">
+      <div class="segmented small" id="view-modes">
+        <button type="button" data-value="composite" class="active">Composite</button>
+        <button type="button" data-value="overlay">Overlay only</button>
+        <button type="button" data-value="shape_mask">Shape mask</button>
+        <button type="button" data-value="cutout_mask">Cut-out mask</button>
+      </div>
+      <button type="button" class="ghost" id="refresh">Refresh preview</button>
+    </div>
+    <div class="viewport" id="viewport">
+      <div class="empty" id="empty-state">
+        <p>Drop a base image and an overlay to begin.</p>
+        <p class="hint">Everything runs on this machine — nothing is uploaded anywhere.</p>
+      </div>
+      <img id="preview" alt="Preview" hidden />
+    </div>
+    <div class="readout" id="readout"></div>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
