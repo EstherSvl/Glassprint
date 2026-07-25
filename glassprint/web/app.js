@@ -85,12 +85,18 @@ function buildSpec() {
       per_element: $("fade-per-element").checked,
       dissolve: Number($("fade-dissolve").value),
       seed: num("fade-seed", 0),
+      layers: Number($("fade-layers").value),
       halftone_mm: Number($("fade-halftone").value),
       halftone_angle: Number($("fade-halftone-angle").value),
       invert: $("fade-invert").checked,
       cutoff: Number($("fade-cutoff").value),
     },
     include_masks: state.view === "shape_mask" || state.view === "cutout_mask",
+    // Without a white base the ink is a glaze, which is multiplicative — the
+    // server renders it properly rather than us faking it with a blend mode.
+    simulate: inkOnGlass()
+      ? { glass: $("glass-color").value, layers: Math.max(1, Number($("fade-layers").value)) }
+      : null,
   };
 }
 
@@ -136,7 +142,8 @@ async function runPreview() {
 function showView() {
   const data = state.lastPreview;
   if (!data) return;
-  const key = { composite: "composite", overlay: "overlay", shape_mask: "shape_mask", cutout_mask: "cutout_mask" }[state.view];
+  // In no-white mode the glaze render replaces the plain composite.
+  const key = state.view === "composite" && data.images.glaze ? "glaze" : state.view;
   const src = data.images[key] || data.images.composite;
   const img = $("preview");
   img.src = src;
@@ -389,6 +396,9 @@ function updateLabels() {
   const cutoff = Number($("fade-cutoff").value);
   $("fade-cutoff-value").textContent = cutoff > 0 ? `${Math.round(cutoff * 100)}%` : "off";
 
+  const stack = Number($("fade-layers").value);
+  $("fade-layers-value").textContent = stack > 0 ? `${stack} passes` : "off";
+
   const pitch = Number($("fade-halftone").value);
   $("fade-halftone-value").textContent = pitch > 0 ? `${pitch.toFixed(2)} mm` : "off";
   $("fade-halftone-angle-value").textContent = `${$("fade-halftone-angle").value}°`;
@@ -396,8 +406,9 @@ function updateLabels() {
   $("fade-body").hidden = state.fadeMode === "none";
   $("fade-angle-field").hidden = state.fadeMode !== "linear";
   $("fade-center-row").hidden = state.fadeMode !== "radial";
-  // The screen and the element controls express the same ramp; only one wins.
-  $("fade-dissolve").closest(".field").style.opacity = pitch > 0 ? "0.45" : "1";
+  // Layers, screen and dissolve express the same ramp; the first set wins.
+  $("fade-dissolve").closest(".field").style.opacity = pitch > 0 || stack > 0 ? "0.45" : "1";
+  $("fade-halftone").closest(".row").style.opacity = stack > 0 ? "0.45" : "1";
 }
 
 function applyGlassBackdrop() {
@@ -411,7 +422,6 @@ function applyGlassBackdrop() {
   const viewport = $("viewport");
   viewport.classList.toggle("on-glass", on);
   viewport.style.backgroundColor = on ? $("glass-color").value : "";
-  $("preview").style.mixBlendMode = on && noWhite ? "multiply" : "normal";
   $("glass-on").disabled = noWhite;
 }
 
@@ -484,16 +494,18 @@ function init() {
     "fade-what", "fade-angle", "fade-start", "fade-end", "fade-curve", "fade-dissolve",
     "fade-min", "fade-max", "fade-center-x", "fade-center-y", "fade-cutoff",
     "fade-per-element", "fade-invert", "fade-seed", "fade-halftone", "fade-halftone-angle",
+    "fade-layers",
   ]);
 
   $("glass-on").addEventListener("change", applyGlassBackdrop);
   $("ink-mode").addEventListener("change", () => {
     applyGlassBackdrop();
-    if (state.lastPreview) renderReadout(state.lastPreview.summary);
+    schedulePreview(0);
   });
   $("glass-color").addEventListener("input", () => {
     $("glass-on").checked = true;
     applyGlassBackdrop();
+    if (inkOnGlass()) schedulePreview();
   });
 
   linkColor("color", "color-hex");

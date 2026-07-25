@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
+from .colors import parse_color
 from .compose import ComposeSpec, compose
 from .export import ExportSpec, export
 from .fade import Fade
@@ -26,6 +27,7 @@ from .pattern import Placement
 from .raster import READ_SUFFIXES, Raster
 from .recolor import ColorSpec
 from .segment import Backends
+from .simulate import glaze
 
 WEB_DIR = Path(__file__).parent / "web"
 PREVIEW_MAX_SIDE = 1000
@@ -163,6 +165,7 @@ def _build_spec(payload: dict[str, Any]) -> ComposeSpec:
             per_element=bool(fade_data.get("per_element")),
             dissolve=_float(fade_data.get("dissolve"), 0.0),
             seed=int(_float(fade_data.get("seed"), 0.0)),
+            layers=int(_float(fade_data.get("layers"), 0.0)),
             halftone_mm=_float(fade_data.get("halftone_mm"), 0.0),
             halftone_angle=_float(fade_data.get("halftone_angle"), 45.0),
             invert=bool(fade_data.get("invert")),
@@ -250,6 +253,20 @@ def create_app() -> FastAPI:
 
             images["shape_mask"] = _data_url(_mask_to_raster(result.shape_mask, result.composite))
             images["cutout_mask"] = _data_url(_mask_to_raster(result.cutout_mask, result.composite))
+
+        # Printing without a white underbase is multiplicative, so it needs a
+        # real render rather than compositing over a colour swatch.
+        simulate = payload.get("simulate") or {}
+        glass = parse_color(simulate.get("glass")) if simulate.get("glass") else None
+        if glass:
+            images["glaze"] = _data_url(
+                glaze(
+                    result,
+                    glass,
+                    layers=max(1, int(_float(simulate.get("layers"), 1.0))),
+                    layer_map=result.layer_map,
+                )
+            )
 
         # The preview runs on a downscaled copy; report measurements against the
         # real file so the numbers on screen match what gets exported.

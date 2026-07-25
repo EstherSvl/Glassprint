@@ -266,6 +266,14 @@
           <span class="hint">0 thins every element. 1 drops elements whole and keeps
             the survivors solid — the safest option for printing.</span>
         </label>
+        <label class="field">
+          <span>Ink layers <em id="fade-layers-value">off</em></span>
+          <input type="range" id="fade-layers" min="0" max="8" step="1" value="0" />
+          <span class="hint">Build the fade from stacked passes, dropping layers toward the
+            edge. Every pass is solid ink, so nothing dithers — but N layers make only
+            N+1 steps, so it bands. Stacking also deepens colour, which is how you get
+            saturation back without a white base.</span>
+        </label>
         <div class="row">
           <label class="field">
             <span>Dot screen <em id="fade-halftone-value">off</em></span>
@@ -347,6 +355,8 @@
             <label><input type="checkbox" value="overlay" checked /><span>Overlay only</span></label>
             <label><input type="checkbox" value="shape-mask" /><span>Shape mask</span></label>
             <label><input type="checkbox" value="cutout-mask" /><span>Cut-out mask</span></label>
+            <label><input type="checkbox" value="layer-map" /><span>Layer map</span></label>
+            <label><input type="checkbox" value="layers" /><span>One file per pass</span></label>
           </span>
         </label>
       </div>

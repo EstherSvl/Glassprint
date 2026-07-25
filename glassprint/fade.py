@@ -70,6 +70,12 @@ class Fade:
     #: Keeps the dissolve reproducible between preview and export.
     seed: int = 0
 
+    #: Build the fade out of this many printed ink layers instead of a smooth
+    #: ramp, dropping layers toward the transparent end. 0 leaves it smooth.
+    #: Every layer prints at full coverage, so there is no dither floor at all
+    #: — the cost is that N layers can only make N+1 steps.
+    layers: int = 0
+
     #: Render the ramp as a dot screen instead, at this pitch in millimetres.
     #: 0 turns it off. Keep it coarse — see :func:`halftone`.
     halftone_mm: float = 0.0
@@ -100,6 +106,10 @@ class Fade:
     def screened(self) -> bool:
         return self.halftone_mm > 0
 
+    @property
+    def stacked(self) -> bool:
+        return self.layers > 0
+
     def describe(self) -> str:
         if not self.active:
             return "none"
@@ -111,7 +121,9 @@ class Fade:
         parts.append(f"{self.start:g}–{self.end:g}")
         if self.curve != 1.0:
             parts.append(f"curve {self.curve:g}")
-        if self.screened:
+        if self.stacked:
+            parts.append(f"{self.layers} ink layers")
+        elif self.screened:
             parts.append(f"{self.halftone_mm:g}mm dots at {self.halftone_angle:g}°")
         elif self.dissolve > 0:
             parts.append(f"{self.dissolve:.0%} dissolve")
@@ -210,6 +222,19 @@ def _shape_travel(shape_mask: np.ndarray | None, width: int, height: int) -> np.
     if deepest < 1e-6:
         return np.ones((height, width), dtype=np.float32)
     return np.clip(1.0 - distance / deepest, 0.0, 1.0).astype(np.float32)
+
+
+def quantise(opacity: np.ndarray, layers: int) -> tuple[np.ndarray, np.ndarray]:
+    """Step the ramp into ``layers`` printed ink layers.
+
+    Returns the stepped opacity and the layer count at each pixel (0..layers).
+    Each layer goes down at full coverage, so nothing is ever printed at a
+    density the machine cannot hold — the gradient comes from *how many* passes
+    a region gets, which is the same idea as dissolve turned on its side.
+    """
+    count = max(1, int(layers))
+    counts = np.round(np.clip(opacity, 0.0, 1.0) * count).astype(np.float32)
+    return (counts / count).astype(np.float32), counts
 
 
 #: Coverage at which neighbouring dots first touch (a circle inscribed in its

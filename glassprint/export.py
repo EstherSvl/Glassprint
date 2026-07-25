@@ -24,7 +24,7 @@ from .raster import (
     px_to_mm,
 )
 
-TARGETS = ("composite", "overlay", "shape-mask", "cutout-mask")
+TARGETS = ("composite", "overlay", "shape-mask", "cutout-mask", "layer-map", "layers")
 
 
 @dataclass
@@ -70,7 +70,7 @@ def export(result: ComposeResult, out_dir: str | Path, spec: ExportSpec | None =
 
     for name, layer in layers.items():
         wants_alpha = name != "composite" or result.base.has_alpha
-        for fmt in formats[name]:
+        for fmt in formats.get(name, spec.formats):
             suffix = "jpg" if fmt in ("jpg", "jpeg") else fmt
             path = out_dir / f"{basename}_{name}.{suffix}"
             layer.save(
@@ -110,7 +110,42 @@ def _collect_layers(result: ComposeResult, targets: list[str]) -> dict[str, Rast
             layers["shape-mask"] = _mask_to_raster(result.shape_mask, result.composite)
         elif target == "cutout-mask":
             layers["cutout-mask"] = _mask_to_raster(result.cutout_mask, result.composite)
+        elif target == "layer-map":
+            layers.update(_layer_map(result))
+        elif target == "layers":
+            layers.update(_ink_layers(result))
     return layers
+
+
+def _layer_map(result: ComposeResult) -> dict[str, Raster]:
+    """A greyscale map of how many ink layers each region gets.
+
+    White is the full stack, black is bare glass. This is the shape a relief or
+    height pass wants.
+    """
+    if result.layer_map is None:
+        return {}
+    count = max(1, result.fade.layers)
+    return {"layer-map": _mask_to_raster(result.layer_map / count, result.composite)}
+
+
+def _ink_layers(result: ComposeResult) -> dict[str, Raster]:
+    """One file per printed pass, each at full strength.
+
+    Pass *k* covers everywhere that gets at least *k* layers, so printing them
+    in order builds the gradient out of solid ink — no dithering anywhere.
+    """
+    if result.layer_map is None or result.coverage is None:
+        return {}
+
+    count = max(1, result.fade.layers)
+    out: dict[str, Raster] = {}
+    for index in range(1, count + 1):
+        alpha = result.coverage * (result.layer_map >= index).astype(np.float32)
+        rgba = result.overlay_layer.rgba.copy()
+        rgba[:, :, 3] = np.clip(alpha * 255.0 + 0.5, 0, 255).astype(np.uint8)
+        out[f"layer{index}of{count}"] = Raster(rgba, dpi=result.composite.dpi)
+    return out
 
 
 def _mask_to_raster(mask: np.ndarray, like: Raster) -> Raster:
@@ -134,12 +169,17 @@ def _formats_for(spec: ExportSpec, result: ComposeResult) -> dict[str, list[str]
     if not overlay:
         overlay = ["png"]
 
-    return {
+    formats = {
         "composite": composite,
         "overlay": overlay,
         "shape-mask": requested,
         "cutout-mask": requested,
+        "layer-map": requested,
     }
+    # Each printed pass is a cut-out, so it needs a format that holds alpha.
+    for index in range(1, max(1, result.fade.layers) + 1):
+        formats[f"layer{index}of{result.fade.layers}"] = overlay
+    return formats
 
 
 def _resize_for_output(layer: Raster, spec: ExportSpec, dpi: float) -> Raster:

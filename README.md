@@ -156,17 +156,23 @@ glass genuinely takes over. Blending the artwork toward the glass colour instead
 would leave the underbase at full density and print a solid white patch with
 pale ink on it — a sticker fading, not ink dissolving.
 
-### One ramp, three ways to render it
+### One ramp, four ways to render it
 
 | | What it does | Suits |
 | --- | --- | --- |
 | **Tonal** (the default) | Every element gets more transparent | Anything — but with a white base the tail runs into the printer's dither floor and goes speckly |
 | **Dissolve** (`--fade-dissolve 1`) | Whole elements drop out at an increasing rate; survivors stay fully opaque | Repeating patterns of discrete motifs |
 | **Dot screen** (`--fade-halftone 1.5`) | Manga screentone: tone from dot *size*, every dot full-strength | Solid areas and large motifs, which dissolve can only take or leave |
+| **Ink layers** (`--fade-layers 4`) | Stacked passes, dropped one at a time toward the edge | Printing without a white base, where stacking also deepens colour |
 
-Dissolve and the dot screen are the same trick at different scales — tone from
-*how much* full-strength ink there is, never from how dilute it is. Both dodge
-the dither floor entirely, because nothing is ever laid down faint.
+The last three are the same trick at three different scales — tone from *how
+much* full-strength ink there is, never from how dilute it is. Dissolve works in
+the plane by dropping motifs, the dot screen works in the plane by shrinking
+dots, ink layers work in the Z axis by dropping passes. All three dodge the
+dither floor entirely, because nothing is ever laid down faint.
+
+They are alternatives, not stackable: if you set more than one, layers win, then
+the screen, then dissolve, and the tool says which it used.
 
 Pick by what your artwork is made of. **Discrete motifs → dissolve.** A
 `--fade-dissolve 0.5` in between staggers the two, so some elements fade faster
@@ -207,18 +213,64 @@ distance and sparse coverage reads as a *thinner tint* rather than as specks. A
 plain tonal fade is fine — the printability warning stands down when you tell
 the tool you are printing this way.
 
-What you trade away:
-
-- **Colour fidelity.** Every ink multiplies with the glass. On green glass reds
-  go brown, blues go teal, yellows nearly vanish.
-- **The light end of your range.** Pale colours have little to multiply with, so
-  the usable range compresses toward the dark. Design deeper and more saturated.
+What you trade away is **colour fidelity**: every ink multiplies with the glass,
+so on green glass reds go brown and blues go teal.
 
 Switch the preview between **White base** and **No white base** above the
-canvas. The no-white mode multiplies the artwork with your glass colour, which
-is the same maths the ink does — so what you see is what the glaze will look
-like. It changes the preview only; the exported files are identical either way,
-since the underbase is Studio's decision, not the file's.
+canvas. The no-white mode renders the artwork multiplied through the glass,
+which is the same maths the ink does — so what you see is what the glaze will
+look like. It changes the preview only; the exported files are identical either
+way, since the underbase is Studio's decision, not the file's.
+
+### Getting colour back by stacking layers
+
+Ink transmittances multiply, so a second pass of the same ink squares its
+effect. That pulls the colour away from the glass and toward the ink very
+quickly — for a saturated red on green glass:
+
+| Passes | Transmits | Ink dominance over the glass | Light through |
+| --- | --- | --- | --- |
+| 1 | `[0.45, 0.135, 0.075]` | 6× | 0.220 |
+| 2 | `[0.405, 0.020, 0.011]` | 36× | 0.145 |
+| 3 | `[0.365, 0.003, 0.002]` | 216× | 0.123 |
+
+By three passes the glass's green is gone and the red is genuinely red. **But
+this only works for inks that actually absorb.** A pale ink is nearly
+transparent by definition, so it has almost nothing to absorb with and the glass
+keeps winning no matter how many passes — pale pink goes from 1.7× dominance at
+one layer to 1.9× at five. Pale yellow on green glass still reads green at five
+passes.
+
+So stacking buys back **saturation and hue, not lightness** — and every pass
+costs brightness. The practical read: printing without white on coloured glass
+wants a saturated, dark palette. That is the stained-glass discipline. Pale
+tints are what white ink is actually for.
+
+`--fade-layers 4` builds the fade this way, dropping a pass at a time toward the
+transparent end:
+
+![a four-layer stacked fade previewed on green glass](docs/fade-layers.png)
+
+Each pass is solid ink, so there is no dither floor at all — but four layers can
+only make five steps, so it bands visibly. That is the trade: dissolve and dot
+screens give you smooth density at the cost of texture; layers give you clean
+solid ink at the cost of banding.
+
+**Exports for a layered print.** Two targets, because it depends how your
+software drives the passes:
+
+- `--export layer-map` — one greyscale image where white is the full stack and
+  black is bare glass. This is the shape a relief or height pass wants.
+- `--export layers` — one file per pass (`_layer1of4.png` … `_layer4of4.png`),
+  each at full strength. Pass *k* covers everywhere getting at least *k* layers,
+  so printing them in order builds the gradient out of solid ink. Use these if
+  you are driving the passes yourself.
+
+> Worth checking on your own machine: whether Studio will take a height map for
+> the relief pass, or whether you need to run the passes manually. The tool
+> gives you both shapes; which one you want is a question about the software,
+> not the file. Registration across several passes is the other thing to test —
+> misalignment shows up as colour fringing at edges.
 
 Element dropout is one draw per element from `--fade-seed`, so the same settings
 always produce the same scatter — preview and export match, and you can re-run a
@@ -234,6 +286,7 @@ print months later and get the same object.
 | `--fade-curve` | The rate. 1 is linear; above 1 holds the ink then drops away late; below 1 drops away immediately then trails off |
 | `--fade-min` / `--fade-max` | The two ends of the ramp. Raise `--fade-min` to fade to a ghost rather than to nothing |
 | `--fade-dissolve` | Tonal ↔ dropout, as above |
+| `--fade-layers` | Build the fade from N stacked ink passes. Takes precedence over the screen and dissolve |
 | `--fade-halftone` | Dot screen pitch in mm. Takes precedence over dissolve — they express the same ramp |
 | `--fade-halftone-angle` | Screen angle. 45° is traditional and least obtrusive |
 | `--fade-per-element` | Give each element one opacity instead of letting the ramp cut through it. Keeps motifs crisp |

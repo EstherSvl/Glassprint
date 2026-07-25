@@ -70,6 +70,10 @@ class ComposeResult:
     fade: Fade = field(default_factory=Fade)
     fade_elements: int = 0
     faintest_ink: float = 0.0
+    #: Ink layers at each pixel when the fade is stacked, otherwise None.
+    layer_map: np.ndarray | None = None
+    #: Artwork coverage ignoring the layer stepping — what one pass lays down.
+    coverage: np.ndarray | None = None
     notes: list[str] = field(default_factory=list)
 
     def faintest_alpha(self) -> float:
@@ -110,6 +114,7 @@ class ComposeResult:
                 "elements": self.fade_elements,
                 "dissolve": self.fade.dissolve,
                 "cutoff": self.fade.cutoff,
+                "layers": self.fade.layers,
                 # The faintest ink that will actually be laid down. Under about
                 # 0.12 the printer's dither starts to break up.
                 "faintest_alpha": self.faintest_alpha(),
@@ -233,12 +238,16 @@ def compose(
     # 4. Fade into the glass, then clip to the shape and apply opacity.
     layer_alpha = placed[:, :, 3].astype(np.float32) / 255.0
     faded_elements = 0
+    layer_map: np.ndarray | None = None
 
     if spec.fade.active:
         opacity_field = fade_module.ramp(
             spec.fade, (base.height, base.width), box, shaped
         )
-        if spec.fade.screened:
+        if spec.fade.stacked:
+            opacity_field, layer_map, stack_notes = _stack(opacity_field, spec)
+            notes.extend(stack_notes)
+        elif spec.fade.screened:
             opacity_field, screen_notes = _screen(opacity_field, base, spec)
             notes.extend(screen_notes)
         scope, scope_note = _fade_scope(overlay, cutout, base, box, spec, info, backends)
@@ -248,16 +257,25 @@ def compose(
         # element-level ones stand down rather than averaging the dots away.
         element_spec = (
             dataclass_replace(spec.fade, per_element=False, dissolve=0.0)
-            if spec.fade.screened
+            if (spec.fade.screened or spec.fade.stacked)
             else spec.fade
         )
         layer_alpha, faded_elements = fade_module.apply(
             layer_alpha, opacity_field, element_spec, scope
         )
 
+    # What a single printed pass lays down, before the layer stepping. With a
+    # stacked fade this is the shape of every pass; the layer map says how many
+    # passes each region gets.
+    coverage = placed[:, :, 3].astype(np.float32) / 255.0
+    if layer_map is not None:
+        coverage = coverage * (layer_map > 0).astype(np.float32)
+
     if spec.clip_to_shape:
         layer_alpha = layer_alpha * shaped
+        coverage = coverage * shaped
     layer_alpha = layer_alpha * float(np.clip(spec.opacity, 0.0, 1.0))
+    coverage = coverage * float(np.clip(spec.opacity, 0.0, 1.0))
     layer_alpha = fade_module.apply_cutoff(layer_alpha, spec.fade.cutoff)
 
     overlay_layer = placed.copy()
@@ -280,6 +298,8 @@ def compose(
         fade=spec.fade,
         fade_elements=faded_elements,
         faintest_ink=faintest,
+        layer_map=layer_map,
+        coverage=coverage,
         notes=notes,
     )
 
@@ -312,6 +332,20 @@ def _faintest_ink(
     # region covers area, while a stray dim pixel — the dimple left where four
     # halftone dots meet, say — is far too small to print as anything.
     return round(float(np.percentile(values, 1.0)), 3)
+
+
+def _stack(
+    opacity_field: np.ndarray, spec: ComposeSpec
+) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    """Step the ramp into printed ink layers."""
+    notes: list[str] = []
+    if spec.fade.screened or spec.fade.per_element or spec.fade.dissolve > 0:
+        notes.append(
+            "Ink layers, the dot screen and dissolve are three ways of expressing the "
+            "same fade, so the layers were used and the others left off."
+        )
+    stepped, layer_map = fade_module.quantise(opacity_field, spec.fade.layers)
+    return stepped, layer_map, notes
 
 
 def _screen(
