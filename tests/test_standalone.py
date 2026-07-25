@@ -49,6 +49,17 @@ def test_the_build_loads_nothing_from_a_server(built):
     assert "PyodideBackend" in built.split("window.GlassprintBackend = backend;")[0][-400:]
 
 
+def test_the_library_check_asks_python_not_the_package_names(built):
+    """Pyodide keys loaded packages by display name — "Pillow" for "pillow".
+
+    Comparing those names invented a failure that had not happened and stopped
+    the page from starting. Whether the libraries are usable is a question only
+    an import can answer.
+    """
+    assert ".loadedPackages" not in built, "back to comparing package names"
+    assert "import numpy, scipy.ndimage, PIL.Image, PIL.ImageFilter" in built
+
+
 def test_every_module_the_bridge_imports_is_embedded(built):
     sources = json.loads(re.search(r"window\.GLASSPRINT_PYTHON = (\{.*?\});\n", built, re.S).group(1))
 

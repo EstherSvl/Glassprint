@@ -81,14 +81,19 @@ const PyodideBackend = {
     this.pyodide = pyodide;
 
     this.onProgress("fetching numpy, scipy and Pillow…");
-    const needed = ["numpy", "scipy", "pillow"];
-    await pyodide.loadPackage(needed);
+    await pyodide.loadPackage(["numpy", "scipy", "pillow"]);
     // loadPackage reports a failed download to the console and carries on, so
     // check for ourselves — otherwise the first symptom is an unreadable
-    // traceback about numpy several steps later.
-    const missing = needed.filter((name) => !(name in pyodide.loadedPackages));
-    if (missing.length) {
-      throw new Error(`could not download ${missing.join(", ")} — check the connection`);
+    // traceback several steps later.
+    //
+    // Ask Python whether the imports work rather than inspecting
+    // loadedPackages: that is keyed by each package's display name, which is
+    // "Pillow" where the request was "pillow", so comparing names invents
+    // failures that did not happen.
+    try {
+      pyodide.runPython("import numpy, scipy.ndimage, PIL.Image, PIL.ImageFilter");
+    } catch (error) {
+      throw new Error("the imaging libraries did not load — check the connection and reload");
     }
 
     this.onProgress("unpacking glassprint…");
