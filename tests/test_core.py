@@ -266,3 +266,45 @@ def test_replace_swaps_one_colour_only(pattern_art):
 def test_identity_spec_is_a_no_op(pattern_art):
     art = pattern_art.rgba
     assert recolor.apply(art, recolor.ColorSpec()) is art
+
+
+# -- pure black is a different colour to this printer ------------------------
+
+
+def test_the_black_point_snaps_near_blacks_to_exactly_zero():
+    """RGB(0,0,0) prints dense; RGB(20,20,24) prints thin and blue-grey.
+
+    Artwork almost never contains exact zeros — a scan, a brightness tweak or a
+    JPEG round-trip all leave the darkest pixels just above it, on the weak side
+    of the discontinuity.
+    """
+    art = np.zeros((1, 4, 4), dtype=np.uint8)
+    art[0, :, 3] = 255
+    art[0, 0, :3] = (20, 20, 24)   # the near-black that printed weakly
+    art[0, 1, :3] = (60, 60, 60)   # a genuine dark grey, to be left alone
+    art[0, 2, :3] = (0, 0, 0)      # already pure
+    art[0, 3, :3] = (200, 40, 40)  # a colour, nowhere near the black point
+
+    out = recolor.apply(art, recolor.ColorSpec(black_point=0.12))
+    assert tuple(out[0, 0, :3]) == (0, 0, 0)
+    assert tuple(out[0, 1, :3]) == (60, 60, 60)
+    assert tuple(out[0, 2, :3]) == (0, 0, 0)
+    assert tuple(out[0, 3, :3]) == (200, 40, 40)
+    # Alpha is never touched by a colour treatment.
+    assert list(out[0, :, 3]) == [255] * 4
+
+
+def test_the_black_point_is_off_by_default():
+    """Snapping darks is a decision, not a default — it costs shadow detail."""
+    art = np.zeros((1, 1, 4), dtype=np.uint8)
+    art[0, 0] = (20, 20, 24, 255)
+    assert recolor.ColorSpec().is_identity
+    assert tuple(recolor.apply(art, recolor.ColorSpec())[0, 0, :3]) == (20, 20, 24)
+
+
+def test_the_black_point_survives_a_later_brightness_change():
+    """Snapping happens last, or a brightness tweak would lift it back off zero."""
+    art = np.zeros((1, 1, 4), dtype=np.uint8)
+    art[0, 0] = (20, 20, 24, 255)
+    out = recolor.apply(art, recolor.ColorSpec(black_point=0.12, brightness=1.4))
+    assert tuple(out[0, 0, :3]) == (0, 0, 0)

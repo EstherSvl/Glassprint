@@ -145,6 +145,7 @@ def build_spec(payload: dict[str, Any]) -> ComposeSpec:
             brightness=_float(color_data.get("brightness"), 1.0),
             contrast=_float(color_data.get("contrast"), 1.0),
             invert=bool(color_data.get("invert")),
+            black_point=_float(color_data.get("black_point"), 0.0),
         ),
         glaze=GlazeSpec(
             enabled=bool(glaze_data.get("enabled")),

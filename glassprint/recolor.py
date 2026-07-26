@@ -30,6 +30,16 @@ class ColorSpec:
     contrast: float = 1.0           # multiplier around mid grey
     invert: bool = False
 
+    #: Snap anything this dark, or darker, to exactly RGB(0,0,0). 0 turns it off.
+    #:
+    #: Worth having because the printer treats pure black as a different colour
+    #: from near-black — RGB(0,0,0) prints dense and warm, RGB(20,20,24) thin and
+    #: blue-grey. Artwork rarely contains exact zeros: a photograph, a scan, a
+    #: brightness tweak or a JPEG round-trip all leave the darkest pixels a
+    #: little above it, and every one of those lands on the weak side of the
+    #: discontinuity.
+    black_point: float = 0.0
+
     @property
     def is_identity(self) -> bool:
         return (
@@ -39,6 +49,7 @@ class ColorSpec:
             and self.brightness == 1.0
             and self.contrast == 1.0
             and not self.invert
+            and not self.black_point
         )
 
 
@@ -85,6 +96,11 @@ def apply(rgba: np.ndarray, spec: ColorSpec) -> np.ndarray:
         rgb = np.clip((rgb - 0.5) * spec.contrast + 0.5, 0.0, 1.0)
     if spec.invert:
         rgb = 1.0 - rgb
+    if spec.black_point > 0.0:
+        # Last, so it is not undone by a later brightness or contrast tweak.
+        rgb = np.where(
+            luminance_of(rgb)[:, :, None] <= spec.black_point, np.float32(0.0), rgb
+        )
 
     out = np.empty_like(rgba)
     out[:, :, :3] = np.clip(rgb * 255.0 + 0.5, 0, 255).astype(np.uint8)
