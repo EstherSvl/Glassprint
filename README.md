@@ -539,6 +539,91 @@ above the preview and set the colour of the glass you're printing on — the
 preview then sits on that colour, which is what the finished piece will look
 like. It changes the preview only, never the exported files.
 
+## Calibrating to your own printer
+
+Everything above still rests on one assumption: that a colour's RGB *is* what it
+lets through. Ask for RGB(0,158,224) and the preview believes 0%, 62% and 88% of
+the red, green and blue get past. No press behaves like that. On the synthetic
+tests that stand in for one here, the assumption is wrong by **73 levels out of
+255** — which is not a preview being slightly optimistic, it is a preview of a
+different colour.
+
+Card 9 in the web interface fixes it, and it costs one small plate of glass.
+
+1. **Get the chart to print** — 84 × 41mm, 44 patches, one pass, no white base.
+   Print it exactly the way you print artwork; the profile measures the whole
+   pipeline, Studio's colour handling included, so it has to see the same
+   settings you actually use.
+2. **Photograph it** flat against a bright white background, with a little of
+   that background showing all round the plate. No flash, no HDR.
+3. **Read a photo of it.** That is the whole calibration.
+
+From then on the glaze preview is a prediction rather than an illustration, and
+a second control appears: *I want this colour on the glass* → **ask the printer
+for this**. That is the useful direction. On dark green glass, asking for a deep
+green gets you black, because the glass has already done most of the darkening —
+what you want to send is something close to white and let the glass supply the
+rest. The tool works that out by inverting the measured model.
+
+The profile is kept in the browser, so it survives closing the tab. Recalibrate
+when you change ink, substrate type, or print settings.
+
+### One chart, or one per glass?
+
+Both, and the split is the useful part. Transmittances multiply:
+
+```
+seen = light · T_glass · T_ink
+```
+
+`T_ink` belongs to the **printer**. `T_glass` belongs to the **glass**. They are
+independent, so the chart measures the printer once and every further glass
+costs three numbers — which the reader takes off the bare-glass corners of the
+same photograph, or off a photo of a bare offcut, with nothing printed at all.
+
+That independence is exact for full spectra and approximate for the three
+channels a camera gives. Two glasses that photograph as the same RGB but
+transmit different *spectra* will not respond to ink identically, and narrow
+transmitters — green glass, cyan ink — are where it strains most. So the profile
+records the glass it was measured on, and `Profile.check()` scores how well it
+carried over to another. Print the chart on your second glass once; if it
+transfers, no further glass ever needs printing.
+
+### What the profile actually says
+
+Twelve numbers, not a lookup table. Absorbance adds where transmittance
+multiplies, so the fit is done there:
+
+```
+x = 1 - requested/255      ink demanded, per channel
+u = x ** gamma             the press's tone curve
+a = A · u                  3x3: how each ink absorbs in its neighbours' bands
+T = 10 ** -a
+```
+
+A forty-entry table would interpolate its own noise, extrapolate into nonsense
+past the edges of the sample, and tell you nothing you could read. Twelve
+parameters overfit far less, **invert in closed form** — which is the entire
+reason "what should I ask for" is answerable at all — and can be read directly:
+`gamma` is how the press ramps, `A` off the diagonal is how muddy the inks go
+when mixed.
+
+Eight of the forty-four cells are held out of the fit entirely, and the last of
+those repeats an earlier patch. So the readout carries its own audit: the
+held-out error says whether the model predicts, and the repeat says how much of
+that error is just the measurement.
+
+```
+glass          #2ea76f
+tone curve     1.05 · 1.10 · 0.90   r · g · b
+ink bleed      21% outside its own channel
+accuracy       1.8 levels — was 73.1
+repeatability  0.2 levels between two prints of one colour
+```
+
+From the command line, `glassprint chart` and `glassprint calibrate photo.jpg`
+do the same two steps and write the profile as JSON.
+
 ## Glazing: building colours from different inks
 
 Repeating one ink only ever amplifies its own spectral shape (`ink ** n`), so it

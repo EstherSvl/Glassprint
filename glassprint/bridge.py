@@ -21,7 +21,7 @@ from typing import Any
 import numpy as np
 
 from . import __version__
-from .colors import parse_color
+from .colors import parse_color, to_hex
 from .compose import ComposeResult, ComposeSpec, GlazeSpec, compose
 from .export import ExportSpec, bundle, render
 from .fade import Fade
@@ -202,6 +202,10 @@ class Bridge:
 
     def __init__(self) -> None:
         self.images: dict[str, Raster] = {}
+        #: Set by :meth:`calibrate`, or restored by the caller from storage.
+        #: Without one every preview falls back to reading an ink's RGB as its
+        #: transmittance, which is the guess this replaces.
+        self.profile: Any = None
 
     # -- input ---------------------------------------------------------
 
@@ -265,6 +269,7 @@ class Bridge:
             images["glazed"] = data_url(Raster(rgba, dpi=result.composite.dpi))
 
         simulate = payload.get("simulate") or {}
+        summary_extra: dict[str, Any] = {}
         glass = parse_color(simulate.get("glass")) if simulate.get("glass") else None
         if glass:
             images["glaze"] = data_url(
@@ -273,8 +278,10 @@ class Bridge:
                     glass,
                     layers=max(1, int(_float(simulate.get("layers"), 1.0))),
                     layer_map=result.layer_map,
+                    profile=self.profile,
                 )
             )
+            summary_extra["calibrated"] = self.profile is not None
 
         # The preview runs on a downscaled copy; report measurements against the
         # real file so the numbers on screen match what gets exported.
@@ -285,7 +292,95 @@ class Bridge:
         summary["base_size_mm"] = [round(v, 1) for v in base.size_mm]
         summary["shape_box"] = [int(round(v * scale)) for v in result.box]
         summary["preview_scale"] = round(1 / scale, 4)
+        summary.update(summary_extra)
         return {"images": images, "summary": summary}
+
+    # -- calibration ---------------------------------------------------
+
+    def chart(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """The printable colour chart, ready to send to the printer."""
+        from .measure import CHART, chart
+
+        dpi = _float(payload.get("dpi"), 600.0)
+        raster = chart(dpi=dpi, label=str(payload.get("label") or ""))
+        return {
+            "file": "glassprint-colour-chart.png",
+            "data": base64.b64encode(raster.encode(fmt="png", dpi=(dpi, dpi))).decode("ascii"),
+            "size_mm": [round(CHART.width_mm, 1), round(CHART.height_mm, 1)],
+            "patches": CHART.columns * CHART.rows,
+            "instructions": [
+                "Print at 100%, one pass, no white base — the same settings you print artwork with.",
+                f"Any glass at least {CHART.width_mm:.0f} x {CHART.height_mm:.0f}mm will do.",
+                "Photograph it flat against a bright white background, with a little "
+                "of that background showing all round the plate.",
+                "No flash, no HDR, and nothing casting a shadow across the plate.",
+            ],
+        }
+
+    def calibrate(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Read a photograph of the printed chart and keep the result."""
+        from .measure import ReadError, read
+
+        data = base64.b64decode(payload.get("data") or "")
+        if not data:
+            raise BridgeError("Send a photograph of the printed chart.")
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise BridgeError("File is larger than 200 MB.", status=413)
+        try:
+            photo = Raster.from_bytes(data, name="chart")
+        except Exception as exc:
+            raise BridgeError(f"Could not read that photograph ({exc}).")
+
+        glass = parse_color(payload.get("glass")) if payload.get("glass") else None
+        try:
+            profile = read(photo.rgba[:, :, :3], glass=glass)
+        except ReadError as exc:
+            raise BridgeError(str(exc))
+
+        self.profile = profile
+        return {"profile": profile.as_dict(), "report": _profile_report(profile)}
+
+    def load_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Restore a profile the caller saved earlier."""
+        from .measure import Profile
+
+        data = payload.get("profile")
+        if not isinstance(data, dict):
+            raise BridgeError("Send a profile to load.")
+        try:
+            self.profile = Profile.from_dict(data)
+        except (KeyError, ValueError, TypeError) as exc:
+            raise BridgeError(f"That is not a glassprint profile ({exc}).")
+        return {"profile": self.profile.as_dict(), "report": _profile_report(self.profile)}
+
+    def colour(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Both directions at once: what a request looks like, and what to ask for."""
+        if self.profile is None:
+            raise BridgeError("Measure a chart first — there is nothing to predict with.")
+        glass = parse_color(payload.get("glass")) if payload.get("glass") else None
+        answer: dict[str, Any] = {"glass": to_hex(glass or self.profile.glass)}
+
+        if payload.get("requested"):
+            requested = parse_color(payload["requested"])
+            if requested is None:
+                raise BridgeError(f"Cannot read the colour {payload['requested']!r}.")
+            answer["requested"] = to_hex(requested)
+            answer["looks_like"] = to_hex(self.profile.predict(requested, glass))
+        if payload.get("wanted"):
+            wanted = parse_color(payload["wanted"])
+            if wanted is None:
+                raise BridgeError(f"Cannot read the colour {payload['wanted']!r}.")
+            ask, reachable = self.profile.request_for(wanted, glass)
+            answer["wanted"] = to_hex(wanted)
+            answer["ask_for"] = to_hex(ask)
+            answer["reachable"] = reachable
+            answer["closest"] = to_hex(self.profile.predict(ask, glass))
+            if not reachable:
+                answer["note"] = (
+                    "Brighter than the glass in at least one channel, so no amount of ink "
+                    "reaches it — ink only ever subtracts. This is the closest it goes."
+                )
+        return answer
 
     def render_export(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Encode every requested file. The caller decides where they go."""
@@ -299,6 +394,43 @@ class Bridge:
         return {"files": files, "summary": result.summary()}
 
 
+def _profile_report(profile: Any) -> dict[str, Any]:
+    """The profile in the terms someone reading it would ask about."""
+    import numpy as _np
+
+    residuals = profile.residuals()
+    original, repeat = _measure().REPEAT
+    noise = None
+    if len(profile.measured) > repeat:
+        noise = round(
+            float(_np.abs(profile.measured[original] - profile.measured[repeat]).mean() * 255), 1
+        )
+    return {
+        "glass": to_hex(profile.glass),
+        "gamma": [round(float(g), 2) for g in profile.gamma],
+        "density": [round(float(profile.crosstalk[i][i]), 2) for i in range(3)],
+        # How much each ink absorbs outside its own channel, relative to inside
+        # it. Zero would be a perfect ink; the number says how muddy mixtures go.
+        "muddiness": round(
+            float(
+                (_np.abs(profile.crosstalk).sum() - _np.abs(_np.diag(profile.crosstalk)).sum())
+                / max(float(_np.abs(_np.diag(profile.crosstalk)).sum()), 1e-6)
+            ),
+            3,
+        ),
+        "error_levels": residuals.get("held_out"),
+        "uncalibrated_error_levels": residuals.get("naive"),
+        "noise_levels": noise,
+        "note": profile.note,
+    }
+
+
+def _measure():
+    from . import measure
+
+    return measure
+
+
 def capabilities() -> dict[str, Any]:
     probe = Backends.probe()
     return {
@@ -308,6 +440,7 @@ def capabilities() -> dict[str, Any]:
         "subject_cutout": probe["rembg"],
         "claude": probe["anthropic"],
         "read_formats": sorted(s.lstrip(".") for s in READ_SUFFIXES),
+        "calibration": True,
     }
 
 
@@ -340,6 +473,14 @@ def handle(method: str, payload_json: str = "{}") -> str:
             )
         elif method == "preview":
             result = _BRIDGE.preview(payload)
+        elif method == "chart":
+            result = _BRIDGE.chart(payload)
+        elif method == "calibrate":
+            result = _BRIDGE.calibrate(payload)
+        elif method == "load_profile":
+            result = _BRIDGE.load_profile(payload)
+        elif method == "colour":
+            result = _BRIDGE.colour(payload)
         elif method == "export":
             result = _BRIDGE.render_export(payload)
             files = result["files"]

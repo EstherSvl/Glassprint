@@ -415,6 +415,37 @@
       <button class="primary" id="export-button" disabled>Export</button>
       <div id="export-result"></div>
     </section>
+
+    <section class="card">
+      <h2>9 · Calibrate to your printer</h2>
+      <p class="hint">Until this is done, every preview assumes a colour's RGB is
+        exactly what it lets through the glass. It isn't — on a real press that's
+        wrong by tens of levels. Print the chart once, photograph it, and the
+        preview becomes a prediction.</p>
+
+      <div id="profile-summary" class="profile" hidden></div>
+
+      <div class="row">
+        <button class="ghost" id="chart-button">Get the chart to print</button>
+        <button class="ghost" id="calibrate-button">Read a photo of it</button>
+      </div>
+      <input type="file" id="file-chart" accept="image/*" hidden />
+      <div id="chart-result"></div>
+
+      <div id="colour-tool" hidden>
+        <label class="field">
+          <span>I want this colour on the glass</span>
+          <span class="colour-pair">
+            <input type="color" id="want-colour" value="#1e6b4a" />
+            <input type="text" id="want-hex" value="#1e6b4a" spellcheck="false" />
+          </span>
+        </label>
+        <div id="colour-answer"></div>
+        <p class="hint">Send the printer the colour on the right, not the one you want —
+          the glass supplies the rest.</p>
+      </div>
+      <button class="ghost" id="forget-profile" hidden>Forget this calibration</button>
+    </section>
   </aside>
 
   <section class="stage">

@@ -89,6 +89,20 @@ def create_app() -> FastAPI:
         except BridgeError as exc:
             raise _http(exc)
 
+    # Calibration is the same handful of Bridge methods whichever shell is in
+    # front of it, so it gets one route rather than four near-identical ones.
+    CALLABLE = {"chart", "calibrate", "load_profile", "colour"}
+
+    @app.post("/api/call/{method}")
+    def call(method: str, payload: dict[str, Any]) -> JSONResponse:
+        if method not in CALLABLE:
+            raise HTTPException(status_code=404, detail=f"unknown method {method!r}")
+        sid, session = _session(payload.get("session_id"), create=True)
+        try:
+            return JSONResponse({"session_id": sid, **getattr(session, method)(payload)})
+        except BridgeError as exc:
+            raise _http(exc)
+
     @app.post("/api/export")
     def export_files(payload: dict[str, Any]) -> JSONResponse:
         sid, session = _session(payload.get("session_id"))

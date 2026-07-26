@@ -185,9 +185,10 @@ button.ghost:hover { color: var(--text); border-color: var(--accent); }
 #export-result { font-size: 12px; }
 #export-result ul { margin: 8px 0 0; padding-left: 0; list-style: none; }
 #export-result li { padding: 4px 0; border-bottom: 1px solid var(--line); }
-#export-result a { color: var(--accent); text-decoration: none; }
-#export-result a:hover { text-decoration: underline; }
-#export-result .path { color: var(--muted); word-break: break-all; }
+#export-result a, #chart-result a { color: var(--accent); text-decoration: none; }
+#export-result a:hover, #chart-result a:hover { text-decoration: underline; }
+#export-result .path, #chart-result .path { color: var(--muted); word-break: break-all; }
+#chart-result .bundle { font-weight: 600; }
 
 /* One column — a tablet held upright, or a narrow window. The controls run to
  * eight cards, so left in document order the preview ends up far below the
@@ -219,3 +220,29 @@ button.ghost:hover { color: var(--text); border-color: var(--accent); }
 }
 .recipes .arrow { opacity: .5; }
 .recipes .recipe { color: var(--text); }
+
+/* --- calibration --- */
+#chart-result { font-size: 12px; color: var(--muted); }
+#chart-result ol { margin: 6px 0 0; padding-left: 18px; }
+#chart-result li { margin-bottom: 3px; }
+.profile {
+  display: grid; grid-template-columns: auto 1fr; gap: 3px 12px;
+  padding: 9px 11px; margin-bottom: 10px; font-size: 12px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--accent-soft);
+}
+.profile dt { color: var(--muted); }
+.profile dd { margin: 0; color: var(--text); }
+.profile .swatch {
+  display: inline-block; width: 11px; height: 11px; margin-right: 5px;
+  vertical-align: -1px; border: 1px solid var(--line); border-radius: 2px;
+}
+.colour-pair { display: flex; gap: 6px; align-items: center; }
+.colour-pair input[type="color"] { width: 34px; height: 28px; flex: none; }
+#colour-tool { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+#colour-answer { font-size: 12px; }
+#colour-answer .ask {
+  display: flex; align-items: center; gap: 8px; padding: 7px 9px;
+  border: 1px solid var(--line); border-radius: 8px;
+}
+#colour-answer .ask b { font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+#colour-answer .warn { color: var(--warn, #d9a441); margin: 6px 0 0; }

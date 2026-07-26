@@ -370,7 +370,179 @@ async function runExport() {
   }
 }
 
+
+/* -------------------------------------------------------------- calibration */
+
+/* The profile outlives the tab. Recalibrating means printing another plate, so
+ * losing it to a refresh would be a genuinely expensive mistake. */
+const PROFILE_KEY = "glassprint.profile";
+
+function saveProfile(profile) {
+  try {
+    window.localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+  } catch (error) {
+    /* Private browsing, or a full quota. The profile still works this session. */
+  }
+}
+
+function storedProfile() {
+  try {
+    const raw = window.localStorage.getItem(PROFILE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function showProfile(report) {
+  const box = $("profile-summary");
+  if (!report) {
+    box.hidden = true;
+    $("colour-tool").hidden = true;
+    $("forget-profile").hidden = true;
+    return;
+  }
+
+  const gamma = report.gamma.map((g) => g.toFixed(2)).join(" · ");
+  const better = report.uncalibrated_error_levels / Math.max(report.error_levels, 0.1);
+  const rows = [
+    ["glass", `<span class="swatch" style="background:${report.glass}"></span>${report.glass}`],
+    ["tone curve", `${gamma} <span class="hint">r · g · b</span>`],
+    ["ink bleed", `${Math.round(report.muddiness * 100)}% outside its own channel`],
+    ["accuracy", `${report.error_levels} levels — was ${report.uncalibrated_error_levels}`],
+  ];
+  if (report.noise_levels != null) {
+    rows.push(["repeatability", `${report.noise_levels} levels between two prints of one colour`]);
+  }
+  // The two-column grid lives on .profile itself, so the terms and values go
+  // straight in rather than inside a <dl> that would break the grid.
+  box.innerHTML = rows.map(([term, value]) => `<dt>${term}</dt><dd>${value}</dd>`).join("");
+  box.hidden = false;
+  $("colour-tool").hidden = false;
+  $("forget-profile").hidden = false;
+
+  if (better > 3) {
+    setStatus(`calibrated — ${better.toFixed(0)}x closer than the assumption it replaces`);
+  } else {
+    setStatus("calibrated, but barely better than uncalibrated — check the photo", "error");
+  }
+}
+
+async function getChart() {
+  setStatus("drawing the chart…", "busy");
+  try {
+    const data = await backend().call("chart", { session_id: state.sessionId });
+    state.sessionId = data.session_id || state.sessionId;
+
+    const bytes = window.GlassprintBackends.base64ToBytes(data.data);
+    const url = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
+    $("chart-result").innerHTML =
+      `<p class="path"><a class="bundle" href="${url}" download="${escapeHtml(
+        data.file
+      )}">Save ${escapeHtml(data.file)}</a> — ${data.size_mm[0]}×${data.size_mm[1]} mm, ${
+        data.patches
+      } patches</p><ol>${data.instructions
+        .map((line) => `<li>${escapeHtml(line)}</li>`)
+        .join("")}</ol>`;
+    setStatus("chart ready to print");
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
+async function readChart(file) {
+  setStatus("reading the chart…", "busy");
+  try {
+    const buffer = await file.arrayBuffer();
+    const data = await backend().call("calibrate", {
+      session_id: state.sessionId,
+      data: window.GlassprintBackends.bytesToBase64(new Uint8Array(buffer)),
+      glass: $("glass-on").checked ? $("glass-color").value : "",
+    });
+    state.sessionId = data.session_id || state.sessionId;
+    saveProfile(data.profile);
+    showProfile(data.report);
+    updateColourAnswer();
+    schedulePreview(0);
+  } catch (error) {
+    setStatus(error.message, "error");
+  }
+}
+
+let colourTimer = null;
+
+function updateColourAnswer(delay = 250) {
+  clearTimeout(colourTimer);
+  colourTimer = setTimeout(async () => {
+    const wanted = $("want-hex").value.trim();
+    if (!/^#[0-9a-fA-F]{6}$/.test(wanted)) return;
+    try {
+      const data = await backend().call("colour", {
+        session_id: state.sessionId,
+        wanted,
+        glass: $("glass-on").checked ? $("glass-color").value : "",
+      });
+      const warn = data.note ? `<p class="warn">${escapeHtml(data.note)}</p>` : "";
+      $("colour-answer").innerHTML =
+        `<div class="ask"><span class="swatch" style="background:${data.ask_for}"></span>` +
+        `ask the printer for <b>${data.ask_for}</b></div>${warn}`;
+    } catch (error) {
+      $("colour-answer").innerHTML = "";
+    }
+  }, delay);
+}
+
+async function restoreProfile() {
+  const saved = storedProfile();
+  if (!saved) return;
+  try {
+    const data = await backend().call("load_profile", {
+      session_id: state.sessionId,
+      profile: saved,
+    });
+    state.sessionId = data.session_id || state.sessionId;
+    showProfile(data.report);
+    updateColourAnswer(0);
+  } catch (error) {
+    // A profile from an older build is not worth an error message on startup.
+    window.localStorage.removeItem(PROFILE_KEY);
+  }
+}
+
+function wireCalibration() {
+  $("chart-button").addEventListener("click", getChart);
+  $("calibrate-button").addEventListener("click", () => $("file-chart").click());
+  $("file-chart").addEventListener("change", () => {
+    const file = $("file-chart").files[0];
+    if (file) readChart(file);
+    $("file-chart").value = "";
+  });
+  $("forget-profile").addEventListener("click", async () => {
+    window.localStorage.removeItem(PROFILE_KEY);
+    showProfile(null);
+    try {
+      await backend().call("load_profile", { session_id: state.sessionId, profile: null });
+    } catch (error) {
+      /* The bridge refuses a null profile; the page state is what matters. */
+    }
+    setStatus("calibration forgotten — previews are back to assuming");
+    schedulePreview(0);
+  });
+  // Deliberately not linkColor(): that one also schedules a preview, and the
+  // colour being asked about here has nothing to do with the artwork.
+  $("want-colour").addEventListener("input", () => {
+    $("want-hex").value = $("want-colour").value;
+    updateColourAnswer();
+  });
+  $("want-hex").addEventListener("change", () => {
+    const hex = $("want-hex").value.trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(hex)) $("want-colour").value = hex;
+    updateColourAnswer(0);
+  });
+}
+
 /* -------------------------------------------------------------------- wiring */
+
 
 function bindSegmented(id, onChange) {
   $(id).addEventListener("click", (event) => {
@@ -556,6 +728,8 @@ function init() {
     $("glass-on").checked = true;
     applyGlassBackdrop();
     if (inkOnGlass()) schedulePreview();
+    // The answer to "what should I ask for" depends on what it lands on.
+    updateColourAnswer();
   });
 
   linkColor("color", "color-hex");
@@ -565,9 +739,11 @@ function init() {
   $("refresh").addEventListener("click", () => schedulePreview(0));
   $("export-button").addEventListener("click", runExport);
 
+  wireCalibration();
+
   updateLabels();
   applyGlassBackdrop();
-  loadCapabilities();
+  loadCapabilities().then(restoreProfile);
 }
 
 // The browser build has to finish starting Python before any of this is

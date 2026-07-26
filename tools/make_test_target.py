@@ -493,6 +493,18 @@ def main() -> int:
         tile.save(out, fmt="png", dpi=(DPI, DPI))
         print(f"{out.name:38} {tile.width}x{tile.height}px  {w:.0f}x{h:.0f}mm")
 
+    # Not drawn here: glassprint.measure owns the chart's geometry, because the
+    # reader has to look in exactly the places the printer put things.
+    from glassprint.measure import CHART, chart as colour_chart
+
+    tile = colour_chart(dpi=DPI)
+    out = OUT / "glassprint-colour-chart.png"
+    tile.save(out, fmt="png", dpi=(DPI, DPI))
+    print(
+        f"{out.name:38} {tile.width}x{tile.height}px  "
+        f"{px_mm(tile.width):.0f}x{px_mm(tile.height):.0f}mm"
+    )
+
     passes = glaze_test()
     for index, raster in enumerate(passes, start=1):
         out = OUT / f"glassprint-glaze-pass{index}of4.png"

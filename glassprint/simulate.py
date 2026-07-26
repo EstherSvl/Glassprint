@@ -15,9 +15,14 @@ from __future__ import annotations
 
 import numpy as np
 
+from typing import TYPE_CHECKING
+
 from .colors import RGB
 from .compose import ComposeResult
 from .raster import Raster
+
+if TYPE_CHECKING:  # pragma: no cover
+    from .measure import Profile
 
 
 def glaze(
@@ -26,17 +31,24 @@ def glaze(
     *,
     layers: int = 1,
     layer_map: np.ndarray | None = None,
+    profile: "Profile | None" = None,
 ) -> Raster:
     """Render the composite as ink on coloured glass, with no white behind it.
 
     ``layers`` is how many passes a fully-inked region gets. ``layer_map`` gives
     a per-pixel count for a stacked fade; without one every inked pixel gets
     ``layers`` passes.
+
+    Without a ``profile`` this reads each colour's RGB as its transmittance,
+    which is the assumption the whole module was built on and is wrong by tens
+    of levels on a real press. With one — see :mod:`glassprint.measure` — the
+    same arithmetic runs on measured numbers, and the preview becomes a
+    prediction rather than an illustration.
     """
     glass_rgb = np.array(glass, dtype=np.float32)[None, None, :] / 255.0
 
     # The base artwork is ink too, and gets one pass.
-    transmitted = glass_rgb * _film(result.base.rgb_f, result.base.alpha_f, None)
+    transmitted = glass_rgb * _film(_ink(result.base.rgb_f, profile), result.base.alpha_f, None)
 
     overlay = result.overlay_layer
     coverage = result.coverage if result.coverage is not None else overlay.alpha_f
@@ -45,12 +57,19 @@ def glaze(
     else:
         counts = layer_map.astype(np.float32)
 
-    transmitted = transmitted * _film(overlay.rgb_f, coverage, counts)
+    transmitted = transmitted * _film(_ink(overlay.rgb_f, profile), coverage, counts)
 
     rgba = np.empty_like(result.composite.rgba)
     rgba[:, :, :3] = np.clip(transmitted * 255.0 + 0.5, 0, 255).astype(np.uint8)
     rgba[:, :, 3] = 255
     return Raster(rgba, dpi=result.composite.dpi)
+
+
+def _ink(rgb: np.ndarray, profile: "Profile | None") -> np.ndarray:
+    """What one layer of this colour actually transmits."""
+    if profile is None:
+        return rgb
+    return profile.transmittance(rgb * 255.0).astype(np.float32)
 
 
 def _film(ink: np.ndarray, coverage: np.ndarray, counts: np.ndarray | None) -> np.ndarray:
@@ -64,13 +83,16 @@ def _film(ink: np.ndarray, coverage: np.ndarray, counts: np.ndarray | None) -> n
     return (1.0 - alpha) + alpha * stacked
 
 
-def stack_preview(ink: RGB, glass: RGB, up_to: int = 6) -> list[dict]:
+def stack_preview(ink: RGB, glass: RGB, up_to: int = 6, profile: "Profile | None" = None) -> list[dict]:
     """What one ink looks like over one glass at 1..``up_to`` layers.
 
     Answers the question stacking is really for: how many passes does this
     colour need before the glass stops dictating its hue?
     """
-    ink_t = np.array(ink, dtype=np.float32) / 255.0
+    if profile is not None:
+        ink_t = profile.transmittance(np.array(ink, dtype=np.float64)).astype(np.float32)
+    else:
+        ink_t = np.array(ink, dtype=np.float32) / 255.0
     glass_t = np.array(glass, dtype=np.float32) / 255.0
 
     rows: list[dict] = []

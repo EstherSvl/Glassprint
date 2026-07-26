@@ -152,3 +152,94 @@ def test_preview_measurements_describe_the_full_size_file_not_the_preview(base_s
     # The shape box is reported against the full-size canvas, so it can exceed
     # the preview's own dimensions.
     assert max(summary["shape_box"]) > 400
+
+
+# -- calibration ------------------------------------------------------------
+
+
+def _photo_b64() -> str:
+    """A JPEG of the printed chart, base64'd, as the browser would send it."""
+    from test_measure import photograph
+
+    buffer = io.BytesIO()
+    Image.fromarray(photograph()).save(buffer, "JPEG", quality=92)
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def test_chart_comes_back_printable_with_instructions():
+    data = _call("chart", {})["ok"]
+    assert data["file"].endswith(".png")
+    assert data["size_mm"][0] < 145 and data["size_mm"][1] < 50
+    assert data["patches"] == 44
+    assert any("100%" in line for line in data["instructions"])
+    png = base64.b64decode(data["data"])
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_calibrating_reports_something_a_person_can_read():
+    report = _call("calibrate", {"data": _photo_b64()})["ok"]["report"]
+    assert report["error_levels"] < 5
+    # The whole justification for spending a plate of glass.
+    assert report["uncalibrated_error_levels"] > 10 * report["error_levels"]
+    assert len(report["gamma"]) == 3
+    assert report["glass"].startswith("#")
+
+
+def test_a_profile_makes_the_preview_say_it_is_calibrated(base_shape, pattern_art):
+    _load(base_shape, pattern_art)
+    _call("calibrate", {"data": _photo_b64()})["ok"]
+    summary = _call("preview", {"simulate": {"glass": "#2ea76f"}})["ok"]["summary"]
+    assert summary["calibrated"] is True
+
+
+def test_the_glaze_preview_changes_once_calibrated(base_shape, pattern_art):
+    """If calibration did not move the picture it was not doing anything."""
+    _load(base_shape, pattern_art)
+    payload = {"simulate": {"glass": "#2ea76f"}}
+    before = _call("preview", payload)["ok"]["images"]["glaze"]
+    _call("calibrate", {"data": _photo_b64()})["ok"]
+    after = _call("preview", payload)["ok"]["images"]["glaze"]
+    assert before != after
+
+
+def test_asking_what_to_send_the_printer():
+    _call("calibrate", {"data": _photo_b64()})["ok"]
+    answer = _call("colour", {"wanted": "#1e6b4a", "glass": "#2ea76f"})["ok"]
+    assert answer["reachable"]
+    # On dark green glass the request has to be much lighter than the result,
+    # because the glass has already done most of the darkening.
+    asked = int(answer["ask_for"][1:], 16)
+    wanted = int(answer["wanted"][1:], 16)
+    assert asked > wanted
+
+
+def test_asking_for_something_the_glass_forbids_explains_itself():
+    _call("calibrate", {"data": _photo_b64()})["ok"]
+    answer = _call("colour", {"wanted": "#ffffff", "glass": "#2ea76f"})["ok"]
+    assert answer["reachable"] is False
+    assert "subtracts" in answer["note"]
+
+
+def test_colour_without_a_profile_says_so():
+    bridge._BRIDGE = bridge.Bridge()
+    error = _call("colour", {"wanted": "#123456"})
+    assert "error" in error and "chart" in error["error"]
+
+
+def test_a_profile_survives_being_saved_and_reloaded():
+    first = _call("calibrate", {"data": _photo_b64()})["ok"]
+    bridge._BRIDGE = bridge.Bridge()
+    again = _call("load_profile", {"profile": first["profile"]})["ok"]
+    assert again["report"]["gamma"] == first["report"]["gamma"]
+
+
+def test_rubbish_instead_of_a_profile_is_refused():
+    error = _call("load_profile", {"profile": {"gamma": "nonsense"}})
+    assert "error" in error
+
+
+def test_a_photograph_with_no_chart_in_it_says_what_to_do():
+    buffer = io.BytesIO()
+    Image.new("RGB", (900, 600), (238, 238, 238)).save(buffer, "PNG")
+    error = _call("calibrate", {"data": base64.b64encode(buffer.getvalue()).decode()})
+    assert "error" in error and "chart" in error["error"]
