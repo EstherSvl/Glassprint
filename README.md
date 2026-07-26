@@ -412,10 +412,17 @@ the assumptions turned out to be wrong in kind, not merely in degree.
 | **Tone by dot coverage** | Works the whole range, with much more contrast |
 | **Pure vs near black** | RGB(0,0,0) dense and warm; RGB(20,20,24) thin and blue-grey |
 | **Top of the ramp** | A sharp step from 100% to 90% — the black-point discontinuity |
-| **Registration, across** | 0.02mm over four hand-fed passes. Essentially perfect |
-| **Registration, down** | ~0.8mm. Forty times worse, on the same plate |
+| **Registration, across** | 0.02mm over four hand-fed passes |
+| **Registration, down** | ~0.8mm — but see below; the cause is not established |
 | **Stacking black** | Reaches a genuine black by the third pass |
 | **Stacking yellow** | Barely moves — a pale ink has little left to absorb |
+
+The vertical figure is a measurement of the *outcome*, not of the machine. Each
+pass was placed by hand in Studio, so a placement error and a mechanical offset
+are indistinguishable in that number — and a consistent, plate-wide translation
+is at least as characteristic of the former. The files were checked and draw
+every pass at identical heights, so they are not the cause. Separating the
+remaining two needs a run where placement is not repeated between passes.
 | **Dot pitch** | 0.25mm bridges into blotches · 0.4mm weak · 0.6mm+ clean |
 | **Line width** | Everything from 0.08mm printed; 0.2mm+ is dependable |
 | **Text** | 1.8mm cap height reads well · 1.2mm marginal · 0.8mm illegible |
