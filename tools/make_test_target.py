@@ -345,7 +345,7 @@ GLAZE_PAIRS = [
 ]
 
 
-def glaze_test(width_mm: float = 110.0, height_mm: float = 80.0) -> list[Raster]:
+def glaze_test(width_mm: float = 100.0, height_mm: float = 76.0) -> list[Raster]:
     """Four files to print one over another, without moving the glass.
 
     Two questions, neither answerable from a single pass. Does repeating an ink
@@ -366,24 +366,30 @@ def glaze_test(width_mm: float = 110.0, height_mm: float = 80.0) -> list[Raster]
     small, tiny = font(1.3), font(1.0)
 
     first.text(
-        (left + mm(3.5), mm(4.0)),
-        f"glassprint glaze · {width_mm:.0f}x{height_mm:.0f}mm · all four, in order, glass unmoved",
+        (left + mm(3.5), mm(3.2)),
+        f"glassprint glaze · {width_mm:.0f}x{height_mm:.0f}mm · all four at 100%, glass unmoved",
         font=small,
         fill=(*INK, 255),
     )
+    # On every pass, not just the first: if pass 2 goes down at a different
+    # scale, two bars of different lengths say so immediately. Their absence is
+    # exactly why a resize went unnoticed until the passes would not line up.
+    for draw in draws:
+        draw.rectangle([left, mm(5.6), left + mm(10), mm(5.6) + mm(0.6)], fill=(*INK, 255))
+    first.text((left + mm(11), mm(5.3)), "10mm — check before every pass", font=tiny, fill=(*INK, 255))
 
     # -- 1. depth: the same ink, one to four passes --------------------------
     first.text(
-        (left, mm(8.0)),
+        (left, mm(8.4)),
         "1  same ink, 1-4 passes — where does it stop deepening?",
         font=small,
         fill=(*INK, 255),
     )
-    block_w, block_h, gap = mm(15.0), mm(7.0), mm(1.6)
-    top = mm(11.5)
+    block_w, block_h, gap = mm(13.0), mm(6.5), mm(1.4)
+    top = mm(11.6)
     for depth in range(1, 5):
         first.text(
-            (left + (depth - 1) * (block_w + gap) + mm(6.5), mm(10.2)),
+            (left + (depth - 1) * (block_w + gap) + mm(5.5), mm(10.4)),
             str(depth),
             font=tiny,
             fill=(*INK, 255),
@@ -409,11 +415,11 @@ def glaze_test(width_mm: float = 110.0, height_mm: float = 80.0) -> list[Raster]
     for index, ((name_a, rgb_a), (name_b, rgb_b)) in enumerate(GLAZE_PAIRS):
         x = left + index * cell
         # Offset halves, so each cell reads: A alone, both, B alone.
-        draws[0].rectangle([x, y, x + int(cell * 0.62), y + mm(10.0)], fill=(*rgb_a, 255))
+        draws[0].rectangle([x, y, x + int(cell * 0.62), y + mm(8.0)], fill=(*rgb_a, 255))
         draws[1].rectangle(
-            [x + int(cell * 0.38), y, x + cell - mm(1.5), y + mm(10.0)], fill=(*rgb_b, 255)
+            [x + int(cell * 0.38), y, x + cell - mm(1.5), y + mm(8.0)], fill=(*rgb_b, 255)
         )
-        first.text((x, y + mm(10.4)), f"{name_a} then {name_b}", font=tiny, fill=(*INK, 255))
+        first.text((x, y + mm(8.4)), f"{name_a} then {name_b}", font=tiny, fill=(*INK, 255))
 
     # -- 3. registration, measured rather than eyeballed ---------------------
     #
@@ -422,7 +428,7 @@ def glaze_test(width_mm: float = 110.0, height_mm: float = 80.0) -> list[Raster]
     # bars, pass 2 the lower ones at known offsets, and whichever pair lines up
     # is the drift. Bars are 0.3mm because 0.1mm hairlines thicken under
     # overspray, which is exactly the error being measured.
-    y += mm(13.0)
+    y += mm(11.4)
     first.text((left, y), "3  registration — which pair lines up? that is the drift", font=small, fill=(*INK, 255))
     y += mm(2.6)
     offsets = [-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3]
@@ -469,10 +475,17 @@ def main() -> int:
         tile.save(out, fmt="png", dpi=(DPI, DPI))
         print(f"{out.name:38} {tile.width}x{tile.height}px  {w:.0f}x{h:.0f}mm")
 
-    for index, raster in enumerate(glaze_test(), start=1):
+    passes = glaze_test()
+    for index, raster in enumerate(passes, start=1):
         out = OUT / f"glassprint-glaze-pass{index}of4.png"
         raster.save(out, fmt="png", dpi=(DPI, DPI))
-    print(f"{'glassprint-glaze-pass1..4of4.png':38} 110x80mm each")
+    # Measured off the raster rather than repeated by hand, which is how the
+    # last one came to claim a size it had stopped being.
+    first = passes[0]
+    print(
+        f"{'glassprint-glaze-pass1..4of4.png':38} {first.width}x{first.height}px  "
+        f"{px_mm(first.width):.0f}x{px_mm(first.height):.0f}mm each"
+    )
     return 0
 
 
