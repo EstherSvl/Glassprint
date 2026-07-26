@@ -31,8 +31,8 @@ OUT = ROOT / "test-target"
 # a scrap of glass and a thimble of ink, not a good sheet. The wide variant is
 # cut to the mini flatbed, where a 300mm ramp resolves banding that a 70mm one
 # hides entirely.
-SIZE_MM = 80.0
-SHAPES = {"tile": (80.0, 80.0), "strip": (320.0, 85.0)}
+SIZE_MM = 90.0
+SHAPES = {"tile": (90.0, 90.0), "short": (160.0, 85.0), "strip": (320.0, 85.0)}
 DPI = 600.0
 MARGIN_MM = 4.0
 
@@ -46,6 +46,10 @@ PITCHES = [0.25, 0.4, 0.6, 0.8, 1.2, 1.8]
 
 #: Line widths in millimetres, for the resolution limit.
 LINES = [0.08, 0.12, 0.2, 0.3, 0.5]
+
+#: Cap heights in millimetres. The labels on this tile are already a legibility
+#: test at 1.1 and 1.4mm; this makes that deliberate and gives it a range.
+TEXT_SIZES = [0.8, 1.2, 1.8, 2.5]
 
 SWATCHES = [
     ("C", (0, 158, 224)),
@@ -108,7 +112,7 @@ def build(variant: str, width_mm: float = SIZE_MM, height_mm: float = SIZE_MM) -
             [x, mm(y), x + step_w - 1, mm(y + 6.0)], fill=(*INK, round(percent * 2.55))
         )
         label(str(percent), x + mm(0.2), y + 6.2, tiny)
-    y += 9.4
+    y += 9.2
 
     # -- 2. the same tones as a dot screen -----------------------------------
     label("2  the same tones as 0.8mm dots — compare with row 1", left, y)
@@ -117,19 +121,19 @@ def build(variant: str, width_mm: float = SIZE_MM, height_mm: float = SIZE_MM) -
     for index, percent in enumerate(STEPS):
         band[:, index * step_w : (index + 1) * step_w] = percent / 100.0
     paste_mask(canvas, halftone(band, mm(0.8), angle=45.0), left, mm(y))
-    y += 7.5
+    y += 7.2
 
     # -- 3. dot pitch, for moire against the printer's own screen -------------
     label("3  dot pitch at 50% — any interference patterns?", left, y)
     y += 2.0
-    patch = mm(8.0)
+    patch = mm(7.0)
     gap = (width - len(PITCHES) * patch) // max(1, len(PITCHES) - 1)
     for index, pitch in enumerate(PITCHES):
         x = left + index * (patch + gap)
         block = np.full((patch, patch), 0.5, dtype=np.float32)
         paste_mask(canvas, halftone(block, mm(pitch), angle=45.0), x, mm(y))
         label(f"{pitch}", x, y + px_mm(patch) + 0.2, tiny)
-    y += px_mm(patch) + 3.4
+    y += px_mm(patch) + 3.1
 
     # -- 4. solid colour, for what the glass does to it -----------------------
     label("4  solid colour — photograph against light and against dark", left, y)
@@ -162,6 +166,15 @@ def build(variant: str, width_mm: float = SIZE_MM, height_mm: float = SIZE_MM) -
     label("100%", left, y + 6.2, tiny)
     label("0%", left + width - mm(3.4), y + 6.2, tiny)
     y += 8.4
+
+    # -- 7. type sizes --------------------------------------------------------
+    label("7  text — the smallest that stays readable", left, y)
+    y += 2.2
+    x = left
+    for size in TEXT_SIZES:
+        draw.text((x, mm(y)), f"{size} Handgloves", font=font(size), fill=(*INK, 255))
+        x += mm(9.0 + size * 9.0)
+    y += max(TEXT_SIZES) + 1.6
 
     # Laying this out by hand is exactly the sort of thing that silently runs
     # off the edge, and a calibration tile with a row missing is worse than none.
