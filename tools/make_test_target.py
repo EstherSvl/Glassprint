@@ -421,24 +421,39 @@ def glaze_test(width_mm: float = 100.0, height_mm: float = 76.0) -> list[Raster]
         )
         first.text((x, y + mm(8.4)), f"{name_a} then {name_b}", font=tiny, fill=(*INK, 255))
 
-    # -- 3. registration, measured rather than eyeballed ---------------------
+    # -- 3. registration, on both axes -------------------------------------
     #
-    # Four crosses printed on top of each other only get thicker; they cannot
-    # say by how much anything moved. This is a vernier: pass 1 lays the upper
-    # bars, pass 2 the lower ones at known offsets, and whichever pair lines up
-    # is the drift. Bars are 0.3mm because 0.1mm hairlines thicken under
-    # overspray, which is exactly the error being measured.
-    y += mm(11.4)
-    first.text((left, y), "3  registration — which pair lines up? that is the drift", font=small, fill=(*INK, 255))
+    # The first version measured across only, and reported 0.02mm — while the
+    # blocks on the same plate carried a 0.8mm pale strip along their top edge,
+    # which is a vertical offset the vernier was blind to. The two axes are not
+    # remotely alike on this machine, so each now gets its own scale: fine steps
+    # across, where it repeats almost perfectly, and coarse ones down, where it
+    # does not.
+    y += mm(11.0)
+    first.text((left, y), "3  registration — which pair lines up? across, then down", font=small, fill=(*INK, 255))
     y += mm(2.6)
-    offsets = [-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3]
-    span = width // len(offsets)
-    for index, offset in enumerate(offsets):
+    half = width // 2
+
+    across = [-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3]
+    span = half // len(across)
+    for index, offset in enumerate(across):
         x = left + index * span + span // 3
-        draws[0].rectangle([x, y, x + mm(0.3), y + mm(3.0)], fill=(*INK, 255))
-        shifted = x + mm(offset) if offset >= 0 else x - mm(-offset)
-        draws[1].rectangle([shifted, y + mm(3.4), shifted + mm(0.3), y + mm(6.4)], fill=(*INK, 255))
-        first.text((x - mm(1.4), y + mm(6.8)), f"{offset:+.1f}", font=tiny, fill=(*INK, 255))
+        draws[0].rectangle([x, y, x + mm(0.3), y + mm(2.6)], fill=(*INK, 255))
+        shifted = x + int(mm(1.0) * offset)
+        draws[1].rectangle([shifted, y + mm(3.0), shifted + mm(0.3), y + mm(5.6)], fill=(*INK, 255))
+        first.text((x - mm(1.4), y + mm(6.0)), f"{offset:+.1f}", font=tiny, fill=(*INK, 255))
+
+    # Down: horizontal bars, pass 2 offset vertically, read as "which pair is
+    # level". Wider range and coarser steps, because 0.8mm is off the end of a
+    # +/-0.3mm scale entirely.
+    down = [-0.9, -0.6, -0.3, 0.0, 0.3, 0.6, 0.9]
+    span = (width - half) // len(down)
+    for index, offset in enumerate(down):
+        x = left + half + index * span
+        draws[0].rectangle([x, y + mm(2.4), x + mm(2.6), y + mm(2.7)], fill=(*INK, 255))
+        shifted = y + mm(2.4) + int(mm(1.0) * offset)
+        draws[1].rectangle([x + mm(3.0), shifted, x + mm(5.6), shifted + mm(0.3)], fill=(*INK, 255))
+        first.text((x, y + mm(6.0)), f"{offset:+.1f}", font=tiny, fill=(*INK, 255))
 
     for draw in draws:
         corner_marks(draw, canvas_w, canvas_h)
