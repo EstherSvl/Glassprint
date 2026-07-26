@@ -426,20 +426,23 @@ the assumptions turned out to be wrong in kind, not merely in degree.
 
 #### How the registration figures were arrived at
 
-They took three goes, and the first two were wrong, so the working is worth
-keeping.
+Four goes, three of them wrong, and every wrong one made the same mistake:
+reaching for a cause before the geometry was in. The working is kept because the
+pattern is worth recognising, not because the detours were interesting.
 
 The four-pass glaze plate came back with a pale strip along the **top edge** of
-every stacked block, about 0.6mm deep. It was first written down as machine
-drift, which was an over-claim: the file was the obvious other suspect, and
-checking it — every pass draws its blocks at identical heights — only cleared
-the file, it did not convict the machine. Hand placement was the next guess, and
-that was wrong too: the passes had been positioned numerically in Studio, not by
-eye.
+every stacked block, about 0.6mm deep. It was written down first as machine
+drift — an over-claim, since checking the file (every pass draws its blocks at
+identical heights) cleared the file without convicting the machine. Hand
+placement was the second guess, and was wrong: the passes had been positioned
+numerically in Studio, not by eye. A resize between passes was the third, and
+was also wrong; that had happened on an *earlier* plate and was carried over
+here by assumption rather than by evidence.
 
-What settled it was the block that *should not* have a strip. The depth grid
-prints block 1 on pass 1 only, block 2 on passes 1–2, and so on, so the four
-blocks in a row are a built-in control. Profiling all four edges of each:
+The geometry, which does not depend on any of that, comes from the block that
+*should not* have a strip. The depth grid prints block 1 on pass 1 only, block 2
+on passes 1–2, and so on, so the four blocks in a row are a built-in control.
+Profiling all four edges of each:
 
 | | left | right | **top** | **bottom** |
 | --- | --- | --- | --- | --- |
@@ -453,24 +456,32 @@ overspray and edge softness — those would show on every block and every edge.
 The strip appears the instant a second pass lands, on the vertical axis only.
 So it is registration, and the measurement was of something real.
 
-But it does not grow: 0.60 → 0.67 → 0.74 across three more passes. If each pass
+But it does not grow: 0.60 → 0.67 → 0.74 across three more passes. If every pass
 landed somewhere new, four of them would wander much further than 0.14mm. The
-offset is between **pass 1 and everything after it**, and passes 2, 3 and 4
-agree with each other. That is not how a machine drifts; it is how a job looks
-when the first one was set up differently from the rest — which is exactly what
-happened, as pass 1 was resized by hand to fit the glass and passes 2–4 were
-then placed by copying one set of numbers.
+offset is between **pass 1 and everything after it**; passes 2, 3 and 4 agree
+with each other. That is a one-off step, not a drift.
 
-Hence the two figures above: **0.15mm down and 0.1mm across, between passes
-placed identically** — good enough to glaze on. The reading also explains the
-2-pass row having strips top *and* bottom while the 3- and 4-pass rows show only
-the top: the bottom strip is there too, but it is three layers against four
-rather than one against two, and at that depth the difference is invisible.
+Hence the two figures above: **0.15mm down and 0.1mm across, between passes that
+repeat** — good enough to glaze on, which is what the solver needs. The same
+reading explains why the 2-pass row has strips top *and* bottom while the 3- and
+4-pass rows show only the top: the bottom strip is there too, but it is three
+layers against four rather than one against two, and at that depth the
+difference is invisible.
 
-The rule that falls out of it, for anything multi-pass: **set the size once,
-before the first pass, and never touch it again.** If the artwork does not fit
-the glass, move the glass. The 10mm bar printed on every pass exists to catch
-the resize that started this.
+**Where the 0.6mm step came from is unknown, and it is recorded that way.** Three
+explanations have been offered for it and three have been withdrawn. What is
+known: the plate was fresh, the artwork was not resized, and pass 1's position
+was arrived at by moving the artwork to the centre of the glass, with the
+resulting numbers then typed into passes 2–4. So the single asymmetry in the run
+is *dragged versus typed* — but no evidence says Studio treats those
+differently, and asserting it would be the fourth guess of the same kind. No
+other plate has shown the step, and none of the tool's numbers depend on it.
+
+The rule that survives, for anything multi-pass: **fix the size and position
+before the first pass, take the numbers from that pass, and change nothing
+after.** If the artwork does not fit the glass, move the glass. The 10mm bar
+printed on every pass is there to catch a scale change; the corner crosses, also
+on every pass, catch a shift.
 
 Two rows of the glass tile agreed on the alpha figure — a stepped ramp stopped
 after its 45% patch, a continuous one at half its length — and then the same file

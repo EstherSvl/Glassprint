@@ -429,10 +429,10 @@ def glaze_test(width_mm: float = 100.0, height_mm: float = 76.0) -> list[Raster]
     # a scale.
     #
     # Reading those strips block by block later showed the offset sits between
-    # pass 1 and passes 2-4, which agree with each other to 0.15mm — the mark of
-    # a resized first pass rather than a machine that wanders. The down scale is
-    # therefore geometric rather than even: 0.15mm steps to resolve the case
-    # where placement is clean, and 0.6mm ends in case it is not.
+    # pass 1 and passes 2-4, which agree with each other to 0.15mm: a one-off
+    # step, not a drift, and no cause established. The down scale is therefore
+    # geometric rather than even — 0.15mm steps to resolve the repeat, 0.6mm
+    # ends in case the step comes back.
     y += mm(11.0)
     first.text((left, y), "3  registration — which pair lines up? across, then down", font=small, fill=(*INK, 255))
     y += mm(2.6)
