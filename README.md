@@ -406,10 +406,12 @@ the assumptions turned out to be wrong in kind, not merely in degree.
 
 | Measured | Result |
 | --- | --- |
-| **Partial alpha, on green glass** | Tail invisible below ~50% |
-| **Partial alpha, on white card** | Smooth all the way to 5% — *same file* |
-| **Dot coverage** | Prints cleanly down to ~12%, on both |
+| **Tone by alpha, on glass** | Nothing below ~50%. Confirmed three times |
+| **Tone by alpha, on white card** | Smooth to 5% — *same file*. It is the substrate |
+| **Tone by RGB value, on glass** | Works the whole range. **This is the fade** |
+| **Tone by dot coverage** | Works the whole range, with much more contrast |
 | **Pure vs near black** | RGB(0,0,0) dense and warm; RGB(20,20,24) thin and blue-grey |
+| **Top of the ramp** | A sharp step from 100% to 90% — the black-point discontinuity |
 | **Dot pitch** | 0.25mm bridges into blotches · 0.4mm weak · 0.6mm+ clean |
 | **Line width** | Everything from 0.08mm printed; 0.2mm+ is dependable |
 | **Text** | 1.8mm cap height reads well · 1.2mm marginal · 0.8mm illegible |
@@ -422,19 +424,28 @@ after its 45% patch, a continuous one at half its length — and then the same f
 on white card ramped smoothly to 5%. So it is **not** a threshold in the RIP, and
 the first version of this section, which said it was, was wrong.
 
-Three things could account for it, and the likeliest is the one neither of the
-first two guesses considered: **the glass run had the white underbase switched
-on and the card run did not.** Studio builds that underbase from the alpha
-channel, so if the generation thresholds, the tail of a fade loses its white and
-thin ink over bare green glass stops being visible — making the cliff a property
-of the white pass rather than of alpha, and absent entirely with white off.
+Three prints settled it by elimination:
 
-The other two remain possible. The tiles were drawn in RGB(20,20,24), which this
-printer renders as a thin blue-grey where RGB(0,0,0) comes out dense and warm —
-so **ask for exactly zero when you want density**, regardless. And card is read
-in reflection where glass is read mostly in transmission.
+| run | ink | white base | alpha |
+| --- | --- | --- | --- |
+| green glass | near-black | on | died at ~50% |
+| white card | near-black | off | ran to 5% |
+| green glass, retest | **pure black** | **off** | died at 50% |
 
-One print settles it: pure black, white off, same glass.
+Not the ink, then, and not the white pass. **It is the substrate.** Alpha is
+honoured on opaque material and thresholded on transparent — which makes sense,
+because with no white pass and nothing behind the glass, "50% alpha" has no
+background to blend into. Studio has to choose print or not, and chooses at half.
+
+**So do not fade alpha. Fade the colour.** `Fade.carrier="ink"` keeps alpha solid
+as the cut-out and lifts the colour toward white instead. White is the absence of
+ink, so on glass that is a genuine fade to bare glass, and it ramps the whole way.
+
+Two caveats worth knowing. It is *subtle* — the RIP's own dither is very fine, so
+thin ink on tinted glass murmurs where a coarse dot screen shouts; which of those
+you want is an aesthetic choice, not a technical one. And there is a sharp step
+between 100% and 90%, because pure black is a different ink mix from near-black,
+so a ramp starting at solid black jumps at the very top.
 
 What is not in doubt: **coverage works.** Dissolve, dot screens and ink layers
 all vary *how much* full-strength ink there is, and all three ran to 12% on both

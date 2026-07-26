@@ -306,9 +306,9 @@ def test_cutoff_applies_without_a_fade(base_shape, pattern_art):
 
 
 def test_a_tonal_fade_to_nothing_is_flagged():
-    """On glass the tail went missing, so a fade to nothing gets a warning."""
+    """Alpha under half is not printed on glass, so it needs saying."""
     notes = fade_module.check(Fade(mode="linear", start=0.0, end=1.0))
-    assert any("stop short of the glass" in note for note in notes)
+    assert any("not printed at all" in note for note in notes)
     assert any("dot screen" in note for note in notes)
 
 
@@ -354,9 +354,77 @@ def test_the_remedy_names_the_method_that_suits_the_artwork():
     assert "dissolve, a dot screen, or ink layers" in unknown
 
 
-def test_the_warning_offers_the_two_things_that_help_a_tonal_fade():
-    """Pure black prints far denser than near-black, and a shallow fade stays
-    inside the range that is known to work."""
+def test_the_warning_names_the_fix_rather_than_only_the_problem():
+    """The ramp belongs in the colour, which is the one thing that reaches bare
+    glass. Three prints established that; the warning should say so."""
     note = " ".join(fade_module.check(Fade(mode="linear", start=0.0, end=1.0)))
-    assert "pure black" in note
-    assert "shallower" in note
+    assert 'carrier="ink"' in note
+    assert "three times" in note
+
+
+def test_the_ink_carrier_is_not_warned_about():
+    """It is the recommendation, so it must not trip its own warning."""
+    assert fade_module.check(Fade(mode="linear", start=0.0, end=1.0, carrier="ink")) == []
+
+
+# -- carrying the ramp in ink instead of alpha -------------------------------
+#
+# Three prints eliminated every other explanation. Alpha is thresholded at about
+# half on transparent substrate, whatever the ink and whether or not white is on.
+# So the ramp has to travel in the colour, where white means no ink at all.
+
+
+def test_the_ink_carrier_leaves_alpha_alone():
+    """Alpha is the cut-out. It must survive intact, or the shape changes."""
+    alpha = np.ones((4, 8), dtype=np.float32)
+    ramp = np.linspace(1.0, 0.0, 8, dtype=np.float32)[None, :].repeat(4, axis=0)
+
+    faded, _ = fade_module.apply(alpha, ramp, Fade(mode="linear", carrier="ink"))
+    assert np.allclose(faded, alpha), "the ink carrier must not touch alpha"
+
+    # Where the default carrier does exactly the opposite.
+    thinned, _ = fade_module.apply(alpha, ramp, Fade(mode="linear", carrier="alpha"))
+    assert thinned[0, -1] < 0.05
+
+
+def test_the_ink_carrier_lightens_the_colour_toward_white():
+    """White is the absence of ink, so lifting toward it prints less."""
+    art = np.zeros((1, 3, 4), dtype=np.uint8)
+    art[0, :, 3] = 255  # solid black, fully opaque
+    keep = np.array([[1.0, 0.5, 0.0]], dtype=np.float32)
+
+    out = fade_module.as_ink(art, keep)
+    assert tuple(out[0, 0, :3]) == (0, 0, 0)        # untouched at full strength
+    assert tuple(out[0, 2, :3]) == (255, 255, 255)  # gone to white: no ink
+    assert 120 < out[0, 1, 0] < 135                 # halfway is halfway
+    assert list(out[0, :, 3]) == [255] * 3          # alpha never moves
+
+
+def test_both_carriers_use_one_ramp(base_shape, pattern_art):
+    """resolve() exists so the alpha path and the ink path cannot drift apart."""
+    alpha = np.ones((4, 8), dtype=np.float32)
+    ramp = np.linspace(1.0, 0.0, 8, dtype=np.float32)[None, :].repeat(4, axis=0)
+    fade = Fade(mode="linear", dissolve=0.6, seed=7)
+
+    keep_once, _ = fade_module.resolve(alpha, ramp, fade)
+    keep_again, _ = fade_module.resolve(alpha, ramp, fade)
+    assert np.allclose(keep_once, keep_again), "the ramp has to be reproducible"
+
+
+def test_the_ink_carrier_actually_lightens_the_exported_overlay(base_shape, pattern_art):
+    """End to end: the faded end of the overlay must be paler, not thinner."""
+    spec = ComposeSpec(
+        keep="remove the white background",
+        fade=Fade(mode="linear", angle=0.0, carrier="ink", start=0.0, end=1.0),
+    )
+    result = compose(base_shape, pattern_art, spec)
+    rgba = result.overlay_layer.rgba
+    ink = rgba[:, :, 3] > 200
+
+    width = rgba.shape[1]
+    left = rgba[:, : width // 4][ink[:, : width // 4]]
+    right = rgba[:, -width // 4 :][ink[:, -width // 4 :]]
+    assert left.size and right.size
+
+    # Paler at the faded end, while alpha stays solid at both.
+    assert right[:, :3].mean() > left[:, :3].mean() + 20

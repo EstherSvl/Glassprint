@@ -172,6 +172,7 @@ def build_spec(payload: dict[str, Any]) -> ComposeSpec:
             layers=int(_float(fade_data.get("layers"), 0.0)),
             halftone_mm=_float(fade_data.get("halftone_mm"), 0.0),
             halftone_angle=_float(fade_data.get("halftone_angle"), 45.0),
+            carrier=str(fade_data.get("carrier") or "alpha"),
             invert=bool(fade_data.get("invert")),
             cutoff=_float(fade_data.get("cutoff"), 0.0),
         ),

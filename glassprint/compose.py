@@ -288,6 +288,12 @@ def compose(
         layer_alpha, faded_elements = fade_module.apply(
             layer_alpha, opacity_field, element_spec, scope
         )
+        if spec.fade.carrier == "ink":
+            # The ramp goes into the colour rather than the alpha, because on
+            # glass with no white pass alpha is thresholded and the tail never
+            # prints. Same ramp, resolved once and used for both.
+            keep, _ = fade_module.resolve(layer_alpha, opacity_field, element_spec, scope)
+            placed = fade_module.as_ink(placed, keep)
         fade_field = opacity_field
 
     # What a single printed pass lays down, before the layer stepping. With a

@@ -9,8 +9,8 @@ patch with pale ink on it — a sticker fading, not ink dissolving.
 
 Two ways to express the fade, and they mix:
 
-* **Tonal** — every element gets more transparent. Smooth on screen; on glass
-  the tail went missing, for reasons not yet pinned down. See ``ALPHA_CLIFF``.
+* **Tonal** — the ramp thins the ink. Which channel carries it matters enormously
+  on glass: see ``Fade.carrier``, because alpha does not work and colour does.
 * **Dissolve** — whole elements drop out at an increasing rate while the
   survivors stay fully opaque. Tone comes from how *much* full-strength ink
   there is, which is the only kind of tone this printer renders properly.
@@ -48,22 +48,23 @@ MODES = ("none", "linear", "radial", "shape")
 #: of one tile agreed: a stepped ramp died after its 45% patch and a continuous
 #: one died at half its length.
 #:
-#: Read this as a working limit, not a mechanism. The same file printed on white
-#: card ramped smoothly to 5% alpha, so it is not a threshold in the RIP. Three
-#: candidates, in the order they now look likely:
+#: Confirmed by elimination over three prints:
 #:
-#: * **The white underbase was switched on for the glass run and off for the
-#:   card.** Studio builds that underbase from the alpha channel, so if the
-#:   generation thresholds, the tail of a fade loses its white and thin ink over
-#:   bare green glass stops being visible. That would make the cliff a property
-#:   of the white pass — and mean it does not exist with white off at all.
-#: * The test ink was RGB(20,20,24), which this printer renders as a thin cool
-#:   blue-grey, quite unlike RGB(0,0,0). Thin grey at 30% alpha on deep green
-#:   glass may be invisible rather than unprinted.
-#: * The substrate: card is read in reflection, glass mostly in transmission.
+#: ===================  ============  ============  ==================
+#: run                  ink           white base    alpha
+#: ===================  ============  ============  ==================
+#: green glass          near-black    on            died at ~50%
+#: white card           near-black    off           ran to 5%
+#: green glass, retest  pure black    off           died at 50%
+#: ===================  ============  ============  ==================
 #:
-#: One print settles it — pure black, white off, on the same green glass. Until
-#: then, warn rather than correct.
+#: So it is not the ink and not the white pass. It is the substrate: alpha is
+#: thresholded on transparent material and honoured on opaque. Which makes
+#: sense — with no white pass and nothing behind the glass, "50% alpha" has no
+#: background to blend into, so Studio has to choose print or not, and chooses
+#: at half.
+#:
+#: The fix is not to fade alpha. See ``Fade.carrier``.
 ALPHA_CLIFF = 0.5
 
 #: Pure black and near-black are not the same colour to this printer: RGB(0,0,0)
@@ -99,7 +100,12 @@ def check(fade: "Fade", *, pattern: bool | None = None) -> list[str]:
     if not fade.active:
         return notes
 
-    if not fade.screened and not fade.stacked and fade.dissolve < 1.0:
+    if (
+        fade.carrier != "ink"
+        and not fade.screened
+        and not fade.stacked
+        and fade.dissolve < 1.0
+    ):
         # The one mechanism whose behaviour on glass is still in question.
         low = min(fade.min_alpha, fade.max_alpha)
         if low < ALPHA_CLIFF:
@@ -113,14 +119,13 @@ def check(fade: "Fade", *, pattern: bool | None = None) -> list[str]:
                     f"(halftone_mm, {MIN_HALFTONE_MM}mm or coarser) is the way"
                 )
             else:
-                remedy = "carry it with dissolve, a dot screen, or ink layers"
+                remedy = "or carry it with dissolve, a dot screen, or ink layers"
             notes.append(
-                f"tonal fade runs down to {low:.0%} alpha; on green glass the tail "
-                f"stopped being visible under about {ALPHA_CLIFF:.0%}, so it may "
-                f"stop short of the glass rather than reaching it. {remedy}. Two "
-                "things help if you keep it tonal: pure black rather than "
-                "near-black, which this printer prints far denser, and a shallower "
-                "fade that stays in the top half."
+                f"tonal fade runs down to {low:.0%} alpha, and on glass the tail "
+                f"under about {ALPHA_CLIFF:.0%} is not printed at all — measured "
+                "three times, with pure black and with white off. Set "
+                'carrier="ink" to put the ramp in the colour instead, which does '
+                f"reach bare glass; {remedy}."
             )
 
     if fade.screened and fade.halftone_mm < MIN_HALFTONE_MM:
@@ -192,6 +197,21 @@ class Fade:
     #: Screen angle. 45 is the traditional choice; it is the least obtrusive
     #: to the eye and avoids lining the dots up with the artwork's own edges.
     halftone_angle: float = 45.0
+
+    #: Which channel carries the ramp.
+    #:
+    #: ``"alpha"`` thins the ink by making it transparent, which is the obvious
+    #: reading and the one that does not work: on glass with no white pass,
+    #: Studio thresholds alpha at about half and the tail of the fade is simply
+    #: not printed. Measured three times, once per candidate explanation.
+    #:
+    #: ``"ink"`` keeps alpha solid and lightens the colour toward white instead.
+    #: On glass with no white base, lighter means the RIP lays down less ink,
+    #: which means more glass showing through — so it fades to bare glass for
+    #: real, and it ramps the whole way. Smoother than a dot screen and much
+    #: subtler, because the RIP's own dither is very fine and thin ink on tinted
+    #: glass is quiet. A coarse screen shouts; this murmurs.
+    carrier: str = "alpha"
 
     #: Flip the direction of the ramp.
     invert: bool = False
@@ -415,6 +435,24 @@ def apply(
     scope: np.ndarray | None = None,
 ) -> tuple[np.ndarray, int]:
     """Fade ``layer_alpha`` by ``opacity``, returning the alpha and element count."""
+    keep, elements = resolve(layer_alpha, opacity, fade, scope)
+    if fade.carrier == "ink":
+        # The ramp is going into the colour instead; alpha stays as the cut-out.
+        return np.clip(layer_alpha, 0.0, 1.0).astype(np.float32), elements
+    return np.clip(layer_alpha * keep, 0.0, 1.0).astype(np.float32), elements
+
+
+def resolve(
+    layer_alpha: np.ndarray,
+    opacity: np.ndarray,
+    fade: Fade,
+    scope: np.ndarray | None = None,
+) -> tuple[np.ndarray, int]:
+    """The ramp after per-element and scope handling, before it is applied.
+
+    Split out because the ``"ink"`` carrier needs the same field to modulate
+    colour with, and computing it twice would let the two drift apart.
+    """
     keep = np.clip(opacity, 0.0, 1.0).astype(np.float32)
     elements = 0
 
@@ -425,7 +463,22 @@ def apply(
         # Only the selected elements fade; everything else keeps its opacity.
         keep = 1.0 - np.clip(scope, 0.0, 1.0) * (1.0 - keep)
 
-    return np.clip(layer_alpha * keep, 0.0, 1.0).astype(np.float32), elements
+    return keep, elements
+
+
+def as_ink(rgba: np.ndarray, keep: np.ndarray) -> np.ndarray:
+    """Lighten the colour by the ramp, leaving alpha alone.
+
+    White is the absence of ink, so on glass with no white pass a colour lifted
+    toward white prints as less ink and lets more glass through. That is the fade
+    the alpha channel was supposed to give and does not.
+    """
+    out = rgba.copy()
+    rgb = out[:, :, :3].astype(np.float32) / 255.0
+    lift = np.clip(keep, 0.0, 1.0)[:, :, None]
+    rgb = rgb * lift + (1.0 - lift)
+    out[:, :, :3] = np.clip(rgb * 255.0 + 0.5, 0, 255).astype(np.uint8)
+    return out
 
 
 def _by_element(keep: np.ndarray, layer_alpha: np.ndarray, fade: Fade) -> tuple[np.ndarray, int]:
