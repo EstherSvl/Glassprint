@@ -33,7 +33,14 @@ OUT = ROOT / "test-target"
 DPI = 600.0
 MARGIN_MM = 4.0
 
-INK = (20, 20, 24)  # near-black: dither speckle shows against it soonest
+# Pure black, because the printer treats it as a different colour from
+# near-black: RGB(0,0,0) came out a dense warm brown-black, RGB(20,20,24) a thin
+# cool blue-grey. Choosing near-black for the first tiles was a mistake that
+# probably manufactured the alpha cliff it appeared to measure.
+INK = (0, 0, 0)
+
+#: Kept only to print beside pure black and show the difference.
+NEAR_BLACK = (20, 20, 24)
 
 ALL_ROWS = ("steps", "screen", "pitch", "colour", "lines", "fade", "text")
 
@@ -230,7 +237,7 @@ def build(variant: str, width_mm: float, height_mm: float, rows: tuple[str, ...]
 TONES = [100, 90, 80, 70, 60, 50, 40, 30, 20, 15, 10, 5]
 
 
-def black_test(width_mm: float = 134.0, height_mm: float = 70.0) -> Raster:
+def black_test(width_mm: float = 134.0, height_mm: float = 70.0, substrate: str = "WHITE") -> Raster:
     """Is the black cartridge healthy, and which mechanism actually makes tone?
 
     Two jobs. The obvious one is density: on a white substrate, solid black
@@ -257,7 +264,7 @@ def black_test(width_mm: float = 134.0, height_mm: float = 70.0) -> Raster:
     def label(text: str, x: int, top_mm: float, chosen=None) -> None:
         draw.text((x, mm(top_mm)), text, font=chosen or small, fill=(*INK, 255))
 
-    label(f"glassprint black · {width_mm:.0f}x{height_mm:.0f}mm · print on WHITE, no white base", left + mm(3.5), y)
+    label(f"glassprint mechanisms · {width_mm:.0f}x{height_mm:.0f}mm · print on {substrate}, no white base", left + mm(3.5), y)
     y += 2.4
     draw.rectangle([left, mm(y), left + mm(10), mm(y) + mm(0.7)], fill=(*INK, 255))
     label("10mm", left + mm(11), y - 0.3, tiny)
@@ -269,15 +276,15 @@ def black_test(width_mm: float = 134.0, height_mm: float = 70.0) -> Raster:
     draw.rectangle([left, mm(y), left + width // 2 - mm(1), mm(y + 7.0)], fill=(0, 0, 0, 255))
     # Beside it, the near-black used on the glass tile, so the two are
     # comparable and the earlier "dark grey" reading can be placed.
-    draw.rectangle([left + width // 2 + mm(1), mm(y), left + width, mm(y + 7.0)], fill=(*INK, 255))
+    draw.rectangle([left + width // 2 + mm(1), mm(y), left + width, mm(y + 7.0)], fill=(*NEAR_BLACK, 255))
     label("RGB 0,0,0", left + mm(0.4), y + 7.2, tiny)
-    label("RGB 20,20,24 (the glass tile's ink)", left + width // 2 + mm(1.4), y + 7.2, tiny)
+    label("RGB 20,20,24 — the weak one", left + width // 2 + mm(1.4), y + 7.2, tiny)
     y += 10.4
 
     # -- 2, 3, 4. the same tones, three mechanisms, aligned ------------------
     for title, kind in [
         ("2  tone by RGB value, alpha 100% — does this one work?", "rgb"),
-        ("3  tone by alpha, RGB near-black — the control, expect a cliff", "alpha"),
+        ("3  tone by alpha, pure black — did the weak ink fake the cliff?", "alpha"),
         ("4  tone by dot coverage at 0.8mm — known to work", "dots"),
     ]:
         label(title, left, y)
@@ -432,10 +439,14 @@ def main() -> int:
             tile.save(out, fmt="png", dpi=(DPI, DPI))
             print(f"{out.name:38} {tile.width}x{tile.height}px  {width_mm:.0f}x{height_mm:.0f}mm")
 
-    black = black_test()
-    out = OUT / "glassprint-black.png"
-    black.save(out, fmt="png", dpi=(DPI, DPI))
-    print(f"{out.name:38} {black.width}x{black.height}px  134x70mm")
+    for name, (w, h, substrate) in {
+        "black": (134.0, 70.0, "WHITE"),
+        "mechanisms-glass": (110.0, 80.0, "GLASS"),
+    }.items():
+        tile = black_test(w, h, substrate)
+        out = OUT / f"glassprint-{name}.png"
+        tile.save(out, fmt="png", dpi=(DPI, DPI))
+        print(f"{out.name:38} {tile.width}x{tile.height}px  {w:.0f}x{h:.0f}mm")
 
     for index, raster in enumerate(glaze_test(), start=1):
         out = OUT / f"glassprint-glaze-pass{index}of4.png"

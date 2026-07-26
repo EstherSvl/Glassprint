@@ -406,8 +406,10 @@ the assumptions turned out to be wrong in kind, not merely in degree.
 
 | Measured | Result |
 | --- | --- |
-| **Partial alpha** | Prints **nothing** below ~50%. A cliff, not a gradient |
-| **Dot coverage** | Prints cleanly down to ~12% |
+| **Partial alpha, on green glass** | Tail invisible below ~50% |
+| **Partial alpha, on white card** | Smooth all the way to 5% — *same file* |
+| **Dot coverage** | Prints cleanly down to ~12%, on both |
+| **Pure vs near black** | RGB(0,0,0) dense and warm; RGB(20,20,24) thin and blue-grey |
 | **Dot pitch** | 0.25mm bridges into blotches · 0.4mm weak · 0.6mm+ clean |
 | **Line width** | Everything from 0.08mm printed; 0.2mm+ is dependable |
 | **Text** | 1.8mm cap height reads well · 1.2mm marginal · 0.8mm illegible |
@@ -415,14 +417,22 @@ the assumptions turned out to be wrong in kind, not merely in degree.
 | **Physical size** | Correct. 110mm printed as 110mm |
 | **Overspray** | A faint residue beside printed areas |
 
-Two independent rows on the same tile agree on the alpha figure: a stepped ramp
-stopped after its 45% patch, and a continuous ramp stopped at half its length.
+Two rows of the glass tile agreed on the alpha figure — a stepped ramp stopped
+after its 45% patch, a continuous one at half its length — and then the same file
+on white card ramped smoothly to 5%. So it is **not** a threshold in the RIP, and
+the first version of this section, which said it was, was wrong.
 
-**This is why tone has to come from coverage.** A tonal fade does not fade on
-this machine — it runs at roughly half strength and then vanishes mid-ramp. The
-same tones rendered as a dot screen printed four times further down the range.
-Dissolve, dot screen and ink layers all work by varying *how much*
-full-strength ink there is, and all three were unaffected.
+The likeliest cause is the ink. Those tiles were drawn in RGB(20,20,24), which
+this printer renders as a thin blue-grey; RGB(0,0,0) comes out dense and warm.
+There is a discontinuity at the black point, and a thin grey at 30% alpha on
+deep green glass may be invisible rather than absent. **Ask for exactly zero
+when you want density.** A retest with pure black on the same glass is
+outstanding.
+
+What is not in doubt: **coverage works.** Dissolve, dot screens and ink layers
+all vary *how much* full-strength ink there is, and all three ran to 12% on both
+substrates. They are the dependable way to fade whatever the alpha story turns
+out to be.
 
 `glassprint.fade.check()` reports it when a plan crosses those lines, and the
 numbers live in `ALPHA_CLIFF`, `COVERAGE_FLOOR` and `MIN_HALFTONE_MM`.

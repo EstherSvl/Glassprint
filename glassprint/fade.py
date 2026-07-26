@@ -9,24 +9,29 @@ patch with pale ink on it — a sticker fading, not ink dissolving.
 
 Two ways to express the fade, and they mix:
 
-* **Tonal** — every element gets more transparent. Smooth on screen, and on a
-  EufyMake E1 it stops dead: see ``ALPHA_CLIFF`` below.
+* **Tonal** — every element gets more transparent. Smooth on screen; on glass
+  the tail went missing, for reasons not yet pinned down. See ``ALPHA_CLIFF``.
 * **Dissolve** — whole elements drop out at an increasing rate while the
   survivors stay fully opaque. Tone comes from how *much* full-strength ink
   there is, which is the only kind of tone this printer renders properly.
 
 ``Fade.dissolve`` is the blend between them.
 
-Measured on a EufyMake E1, printing on green glass (see README):
+Measured on a EufyMake E1 (see README):
 
-* Partial alpha is **not** partial ink. Below about 50% it prints nothing at
-  all — a cliff, not a gradient. A tonal fade therefore does not fade; it runs
-  at roughly half strength and then vanishes mid-ramp.
-* Coverage — dot size, dropped elements, dropped passes — works smoothly down
-  to about 12%, four times further than alpha manages.
+* On green glass, a tonal fade stopped being visible below about 50% alpha,
+  while the same tones as a dot screen carried on to 12% coverage.
+* On white card, the *same file* ramped smoothly to 5% alpha. So the limit is
+  not a threshold in the RIP, and it is not universal.
 
-So tone has to be built from coverage, and the tonal mode is only safe over the
-top half of its range. ``check()`` says so when a plan crosses the line.
+The likeliest culprit is the ink rather than the mechanism: the tiles used
+RGB(20,20,24), which this printer renders as a thin blue-grey, where RGB(0,0,0)
+comes out dense. Thin grey on deep green glass may be invisible rather than
+absent. That retest is outstanding.
+
+Coverage is unaffected either way, which is the useful part: dropped marks,
+shrinking dots and dropped passes all worked to 12% on both substrates.
+``check()`` reports a plan that leans on the part still in doubt.
 """
 
 from __future__ import annotations
@@ -39,11 +44,29 @@ from scipy import ndimage
 
 MODES = ("none", "linear", "radial", "shape")
 
-#: Alpha below which a EufyMake E1 prints nothing whatsoever. Measured twice on
-#: one tile and agreeing to within a couple of percent: a stepped alpha ramp
-#: stopped after the 45% patch, and an independent continuous ramp stopped at
-#: half its length. Not a soft floor where quality degrades — a cliff.
+#: Alpha below which a tonal fade stopped being visible on green glass. Two rows
+#: of one tile agreed: a stepped ramp died after its 45% patch and a continuous
+#: one died at half its length.
+#:
+#: Read this as a working limit, not a mechanism. The same file printed on white
+#: card ramped smoothly to 5% alpha, so this is not a threshold in the RIP. Two
+#: things differed and only one has been ruled out:
+#:
+#: * The test ink was RGB(20,20,24), which this printer renders as a thin cool
+#:   blue-grey — quite unlike RGB(0,0,0), which comes out dense. Thin grey at 30%
+#:   alpha on deep green glass may simply be invisible rather than unprinted.
+#: * The substrate. Ink on white card is read in reflection; on transparent
+#:   glass most of the contrast has to come from transmission.
+#:
+#: A retest with pure black on the same glass will separate them. Until it does,
+#: warn rather than correct.
 ALPHA_CLIFF = 0.5
+
+#: Pure black and near-black are not the same colour to this printer: RGB(0,0,0)
+#: printed dense and warm, RGB(20,20,24) thin and blue-grey. There is a
+#: discontinuity at the black point, so artwork wanting maximum density has to
+#: ask for exactly zero.
+PURE_BLACK_MATTERS = True
 
 #: Coverage below which a dot screen starts to break up. Same tile: the screened
 #: row was still printing at 12% coverage, where the flat row had been blank for
@@ -73,7 +96,7 @@ def check(fade: "Fade", *, pattern: bool | None = None) -> list[str]:
         return notes
 
     if not fade.screened and not fade.stacked and fade.dissolve < 1.0:
-        # A tonal ramp is the one thing this printer cannot render.
+        # The one mechanism whose behaviour on glass is still in question.
         low = min(fade.min_alpha, fade.max_alpha)
         if low < ALPHA_CLIFF:
             if pattern is True:
@@ -88,11 +111,12 @@ def check(fade: "Fade", *, pattern: bool | None = None) -> list[str]:
             else:
                 remedy = "carry it with dissolve, a dot screen, or ink layers"
             notes.append(
-                f"tonal fade runs down to {low:.0%} alpha, and the printer drops "
-                f"everything under about {ALPHA_CLIFF:.0%} — the fade will stop "
-                f"dead partway instead of reaching the glass. {remedy}. Alpha "
-                f"above {ALPHA_CLIFF:.0%} does print, so a shallow fade is fine "
-                "as far as it goes."
+                f"tonal fade runs down to {low:.0%} alpha; on green glass the tail "
+                f"stopped being visible under about {ALPHA_CLIFF:.0%}, so it may "
+                f"stop short of the glass rather than reaching it. {remedy}. Two "
+                "things help if you keep it tonal: pure black rather than "
+                "near-black, which this printer prints far denser, and a shallower "
+                "fade that stays in the top half."
             )
 
     if fade.screened and fade.halftone_mm < MIN_HALFTONE_MM:

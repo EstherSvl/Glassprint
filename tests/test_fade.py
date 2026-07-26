@@ -305,10 +305,10 @@ def test_cutoff_applies_without_a_fade(base_shape, pattern_art):
 # was still printing at 12% coverage.
 
 
-def test_a_tonal_fade_to_nothing_is_flagged_as_impossible():
-    """It does not fade — it runs at half strength and then stops dead."""
+def test_a_tonal_fade_to_nothing_is_flagged():
+    """On glass the tail went missing, so a fade to nothing gets a warning."""
     notes = fade_module.check(Fade(mode="linear", start=0.0, end=1.0))
-    assert any("stop dead" in note for note in notes)
+    assert any("stop short of the glass" in note for note in notes)
     assert any("dot screen" in note for note in notes)
 
 
@@ -354,7 +354,9 @@ def test_the_remedy_names_the_method_that_suits_the_artwork():
     assert "dissolve, a dot screen, or ink layers" in unknown
 
 
-def test_the_warning_says_the_top_half_still_works():
-    """"It cannot fade" would be wrong — above the cliff alpha prints fine."""
+def test_the_warning_offers_the_two_things_that_help_a_tonal_fade():
+    """Pure black prints far denser than near-black, and a shallow fade stays
+    inside the range that is known to work."""
     note = " ".join(fade_module.check(Fade(mode="linear", start=0.0, end=1.0)))
-    assert "shallow fade is fine" in note
+    assert "pure black" in note
+    assert "shallower" in note
