@@ -56,12 +56,17 @@ COVERAGE_FLOOR = 0.12
 MIN_HALFTONE_MM = 0.6
 
 
-def check(fade: "Fade") -> list[str]:
+def check(fade: "Fade", *, pattern: bool | None = None) -> list[str]:
     """What this fade will actually do on the printer, where that differs.
 
     The measurements behind these are in the module docstring. They are warnings
     rather than corrections because the right fix depends on the picture: a
     shallow fade may be exactly what someone wants.
+
+    ``pattern`` says whether the artwork is made of separate marks. Three
+    different things carry a fade past the alpha cliff and they do not look
+    alike, so knowing which artwork this is turns a list of options into one
+    recommendation.
     """
     notes: list[str] = []
     if not fade.active:
@@ -71,11 +76,23 @@ def check(fade: "Fade") -> list[str]:
         # A tonal ramp is the one thing this printer cannot render.
         low = min(fade.min_alpha, fade.max_alpha)
         if low < ALPHA_CLIFF:
+            if pattern is True:
+                # Dropping whole marks leaves no texture of its own, which on a
+                # repeating pattern reads as the design thinning out.
+                remedy = "dissolve is the one to reach for on artwork like this"
+            elif pattern is False:
+                remedy = (
+                    "there are no separate marks to drop here, so a dot screen "
+                    f"(halftone_mm, {MIN_HALFTONE_MM}mm or coarser) is the way"
+                )
+            else:
+                remedy = "carry it with dissolve, a dot screen, or ink layers"
             notes.append(
                 f"tonal fade runs down to {low:.0%} alpha, and the printer drops "
                 f"everything under about {ALPHA_CLIFF:.0%} — the fade will stop "
-                "dead partway instead of reaching the glass. Use a dot screen "
-                "(halftone_mm), dissolve, or ink layers to carry the tail."
+                f"dead partway instead of reaching the glass. {remedy}. Alpha "
+                f"above {ALPHA_CLIFF:.0%} does print, so a shallow fade is fine "
+                "as far as it goes."
             )
 
     if fade.screened and fade.halftone_mm < MIN_HALFTONE_MM:

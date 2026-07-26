@@ -274,7 +274,7 @@ def compose(
         elif spec.fade.screened:
             opacity_field, screen_notes = _screen(opacity_field, base, spec)
             notes.extend(screen_notes)
-        notes.extend(fade_check(spec.fade))
+        notes.extend(fade_check(spec.fade, pattern=info.is_pattern))
         scope, scope_note = _fade_scope(overlay, cutout, base, box, spec, info, backends)
         if scope_note:
             notes.append(scope_note)

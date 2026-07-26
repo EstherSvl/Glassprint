@@ -336,3 +336,25 @@ def test_the_measured_constants_are_what_the_print_showed():
     assert fade_module.ALPHA_CLIFF == 0.5
     assert fade_module.COVERAGE_FLOOR == 0.12
     assert fade_module.MIN_HALFTONE_MM == 0.6
+
+
+def test_the_remedy_names_the_method_that_suits_the_artwork():
+    """Three things carry a fade past the cliff and they look nothing alike."""
+    tonal = Fade(mode="linear", start=0.0, end=1.0)
+
+    on_a_pattern = " ".join(fade_module.check(tonal, pattern=True))
+    assert "dissolve is the one" in on_a_pattern
+
+    on_a_motif = " ".join(fade_module.check(tonal, pattern=False))
+    assert "dot screen" in on_a_motif
+    assert "no separate marks to drop" in on_a_motif
+
+    # Not knowing is a fair answer too; then it lists them.
+    unknown = " ".join(fade_module.check(tonal))
+    assert "dissolve, a dot screen, or ink layers" in unknown
+
+
+def test_the_warning_says_the_top_half_still_works():
+    """"It cannot fade" would be wrong — above the cliff alpha prints fine."""
+    note = " ".join(fade_module.check(Fade(mode="linear", start=0.0, end=1.0)))
+    assert "shallow fade is fine" in note
