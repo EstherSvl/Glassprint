@@ -223,6 +223,99 @@ def build(variant: str, width_mm: float, height_mm: float, rows: tuple[str, ...]
     return Raster(np.array(canvas, dtype=np.uint8), dpi=(DPI, DPI), name="glassprint-test")
 
 
+# -- the black and mechanism test -------------------------------------------
+
+#: One set of tones, used by all three grey rows so they line up vertically and
+#: can be read against each other by eye.
+TONES = [100, 90, 80, 70, 60, 50, 40, 30, 20, 15, 10, 5]
+
+
+def black_test(width_mm: float = 134.0, height_mm: float = 70.0) -> Raster:
+    """Is the black cartridge healthy, and which mechanism actually makes tone?
+
+    Two jobs. The obvious one is density: on a white substrate, solid black
+    should be black, and a suspect cartridge shows up as grey, banding or
+    dropped nozzles.
+
+    The one that matters more was nearly missed. Three rows carry the same
+    twelve tones by three different means — RGB value, alpha, and dot coverage —
+    aligned so a glance down a column compares them directly. On the glass tile
+    a 50% *alpha* patch fell off the cliff while an RGB 128 swatch at full alpha
+    printed perfectly well. If that holds here, tone by RGB value works where
+    tone by alpha does not, and the fix for fades is far simpler than dots.
+    """
+    canvas_w, canvas_h = mm(width_mm), mm(height_mm)
+    canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+
+    small, tiny = font(1.4), font(1.1)
+    left = mm(MARGIN_MM)
+    width = canvas_w - 2 * left
+    step = width // len(TONES)
+    y = MARGIN_MM
+
+    def label(text: str, x: int, top_mm: float, chosen=None) -> None:
+        draw.text((x, mm(top_mm)), text, font=chosen or small, fill=(*INK, 255))
+
+    label(f"glassprint black · {width_mm:.0f}x{height_mm:.0f}mm · print on WHITE, no white base", left + mm(3.5), y)
+    y += 2.4
+    draw.rectangle([left, mm(y), left + mm(10), mm(y) + mm(0.7)], fill=(*INK, 255))
+    label("10mm", left + mm(11), y - 0.3, tiny)
+    y += 2.8
+
+    # -- 1. is black black? --------------------------------------------------
+    label("1  solid black — compare against something you know is black", left, y)
+    y += 2.0
+    draw.rectangle([left, mm(y), left + width // 2 - mm(1), mm(y + 7.0)], fill=(0, 0, 0, 255))
+    # Beside it, the near-black used on the glass tile, so the two are
+    # comparable and the earlier "dark grey" reading can be placed.
+    draw.rectangle([left + width // 2 + mm(1), mm(y), left + width, mm(y + 7.0)], fill=(*INK, 255))
+    label("RGB 0,0,0", left + mm(0.4), y + 7.2, tiny)
+    label("RGB 20,20,24 (the glass tile's ink)", left + width // 2 + mm(1.4), y + 7.2, tiny)
+    y += 10.4
+
+    # -- 2, 3, 4. the same tones, three mechanisms, aligned ------------------
+    for title, kind in [
+        ("2  tone by RGB value, alpha 100% — does this one work?", "rgb"),
+        ("3  tone by alpha, RGB near-black — the control, expect a cliff", "alpha"),
+        ("4  tone by dot coverage at 0.8mm — known to work", "dots"),
+    ]:
+        label(title, left, y)
+        y += 2.0
+        if kind == "dots":
+            band = np.zeros((mm(6.0), width), dtype=np.float32)
+            for index, percent in enumerate(TONES):
+                band[:, index * step : (index + 1) * step] = percent / 100.0
+            paste_mask(canvas, halftone(band, mm(0.8), angle=45.0), left, mm(y))
+        else:
+            for index, percent in enumerate(TONES):
+                x = left + index * step
+                if kind == "rgb":
+                    # Less ink asked for as a lighter grey, at full alpha.
+                    level = round(255 * (1.0 - percent / 100.0))
+                    fill = (level, level, level, 255)
+                else:
+                    fill = (*INK, round(percent * 2.55))
+                draw.rectangle([x, mm(y), x + step - 1, mm(y + 6.0)], fill=fill)
+        for index, percent in enumerate(TONES):
+            label(str(percent), left + index * step + mm(0.2), y + 6.2, tiny)
+        y += 9.4
+
+    # -- 5. nozzles ----------------------------------------------------------
+    label("5  fine lines — any gaps mean a blocked nozzle", left, y)
+    y += 2.2
+    for row in range(9):
+        top = mm(y) + row * mm(0.6)
+        draw.rectangle([left, top, left + width, top + max(1, mm(0.12))], fill=(0, 0, 0, 255))
+    y += 6.4
+
+    if y > height_mm - MARGIN_MM:
+        raise SystemExit(f"black test overflows: needs {y:.1f}mm of {height_mm - MARGIN_MM:.1f}mm")
+
+    corner_marks(draw, canvas_w, canvas_h)
+    return Raster(np.array(canvas, dtype=np.uint8), dpi=(DPI, DPI), name="glassprint-black")
+
+
 # -- the glaze test ---------------------------------------------------------
 
 GLAZE_INKS = [
@@ -338,6 +431,11 @@ def main() -> int:
             out = OUT / f"glassprint-{shape}-{name}.png"
             tile.save(out, fmt="png", dpi=(DPI, DPI))
             print(f"{out.name:38} {tile.width}x{tile.height}px  {width_mm:.0f}x{height_mm:.0f}mm")
+
+    black = black_test()
+    out = OUT / "glassprint-black.png"
+    black.save(out, fmt="png", dpi=(DPI, DPI))
+    print(f"{out.name:38} {black.width}x{black.height}px  134x70mm")
 
     for index, raster in enumerate(glaze_test(), start=1):
         out = OUT / f"glassprint-glaze-pass{index}of4.png"
