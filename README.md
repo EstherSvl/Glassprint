@@ -412,23 +412,65 @@ the assumptions turned out to be wrong in kind, not merely in degree.
 | **Tone by dot coverage** | Works the whole range, with much more contrast |
 | **Pure vs near black** | RGB(0,0,0) dense and warm; RGB(20,20,24) thin and blue-grey |
 | **Top of the ramp** | A sharp step from 100% to 90% — the black-point discontinuity |
-| **Registration, across** | 0.02mm over four hand-fed passes |
-| **Registration, down** | ~0.8mm — but see below; the cause is not established |
+| **Registration, across** | 0.1mm or better over four hand-fed passes |
+| **Registration, down** | 0.15mm between passes placed from the same numbers |
+| **Edge sharpness** | 0.1mm on one pass; stacking spreads it ~0.05mm a layer |
 | **Stacking black** | Reaches a genuine black by the third pass |
 | **Stacking yellow** | Barely moves — a pale ink has little left to absorb |
-
-The vertical figure is a measurement of the *outcome*, not of the machine. Each
-pass was placed by hand in Studio, so a placement error and a mechanical offset
-are indistinguishable in that number — and a consistent, plate-wide translation
-is at least as characteristic of the former. The files were checked and draw
-every pass at identical heights, so they are not the cause. Separating the
-remaining two needs a run where placement is not repeated between passes.
 | **Dot pitch** | 0.25mm bridges into blotches · 0.4mm weak · 0.6mm+ clean |
 | **Line width** | Everything from 0.08mm printed; 0.2mm+ is dependable |
 | **Text** | 1.8mm cap height reads well · 1.2mm marginal · 0.8mm illegible |
 | **Solid black** | Comes out dark grey — one pass of ink is thin |
 | **Physical size** | Correct. 110mm printed as 110mm |
 | **Overspray** | A faint residue beside printed areas |
+
+#### How the registration figures were arrived at
+
+They took three goes, and the first two were wrong, so the working is worth
+keeping.
+
+The four-pass glaze plate came back with a pale strip along the **top edge** of
+every stacked block, about 0.6mm deep. It was first written down as machine
+drift, which was an over-claim: the file was the obvious other suspect, and
+checking it — every pass draws its blocks at identical heights — only cleared
+the file, it did not convict the machine. Hand placement was the next guess, and
+that was wrong too: the passes had been positioned numerically in Studio, not by
+eye.
+
+What settled it was the block that *should not* have a strip. The depth grid
+prints block 1 on pass 1 only, block 2 on passes 1–2, and so on, so the four
+blocks in a row are a built-in control. Profiling all four edges of each:
+
+| | left | right | **top** | **bottom** |
+| --- | --- | --- | --- | --- |
+| 1 pass | 0.07 | 0.10 | 0.04 | 0.07 |
+| 2 passes | 0.07 | 0.10 | **0.60** | **0.56** |
+| 3 passes | 0.14 | 0.10 | **0.67** | 0.11 |
+| 4 passes | 0.21 | 0.21 | **0.74** | 0.14 |
+
+The single-pass block is crisp to 0.1mm on all four sides, which rules out
+overspray and edge softness — those would show on every block and every edge.
+The strip appears the instant a second pass lands, on the vertical axis only.
+So it is registration, and the measurement was of something real.
+
+But it does not grow: 0.60 → 0.67 → 0.74 across three more passes. If each pass
+landed somewhere new, four of them would wander much further than 0.14mm. The
+offset is between **pass 1 and everything after it**, and passes 2, 3 and 4
+agree with each other. That is not how a machine drifts; it is how a job looks
+when the first one was set up differently from the rest — which is exactly what
+happened, as pass 1 was resized by hand to fit the glass and passes 2–4 were
+then placed by copying one set of numbers.
+
+Hence the two figures above: **0.15mm down and 0.1mm across, between passes
+placed identically** — good enough to glaze on. The reading also explains the
+2-pass row having strips top *and* bottom while the 3- and 4-pass rows show only
+the top: the bottom strip is there too, but it is three layers against four
+rather than one against two, and at that depth the difference is invisible.
+
+The rule that falls out of it, for anything multi-pass: **set the size once,
+before the first pass, and never touch it again.** If the artwork does not fit
+the glass, move the glass. The 10mm bar printed on every pass exists to catch
+the resize that started this.
 
 Two rows of the glass tile agreed on the alpha figure — a stepped ramp stopped
 after its 45% patch, a continuous one at half its length — and then the same file

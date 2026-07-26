@@ -424,11 +424,15 @@ def glaze_test(width_mm: float = 100.0, height_mm: float = 76.0) -> list[Raster]
     # -- 3. registration, on both axes -------------------------------------
     #
     # The first version measured across only, and reported 0.02mm — while the
-    # blocks on the same plate carried a 0.8mm pale strip along their top edge,
-    # which is a vertical offset the vernier was blind to. The two axes are not
-    # remotely alike on this machine, so each now gets its own scale: fine steps
-    # across, where it repeats almost perfectly, and coarse ones down, where it
-    # does not.
+    # blocks on the same plate carried a 0.6mm pale strip along their top edge,
+    # which is a vertical offset the vernier was blind to. So both axes now get
+    # a scale.
+    #
+    # Reading those strips block by block later showed the offset sits between
+    # pass 1 and passes 2-4, which agree with each other to 0.15mm — the mark of
+    # a resized first pass rather than a machine that wanders. The down scale is
+    # therefore geometric rather than even: 0.15mm steps to resolve the case
+    # where placement is clean, and 0.6mm ends in case it is not.
     y += mm(11.0)
     first.text((left, y), "3  registration — which pair lines up? across, then down", font=small, fill=(*INK, 255))
     y += mm(2.6)
@@ -444,16 +448,15 @@ def glaze_test(width_mm: float = 100.0, height_mm: float = 76.0) -> list[Raster]
         first.text((x - mm(1.4), y + mm(6.0)), f"{offset:+.1f}", font=tiny, fill=(*INK, 255))
 
     # Down: horizontal bars, pass 2 offset vertically, read as "which pair is
-    # level". Wider range and coarser steps, because 0.8mm is off the end of a
-    # +/-0.3mm scale entirely.
-    down = [-0.9, -0.6, -0.3, 0.0, 0.3, 0.6, 0.9]
+    # level".
+    down = [-0.6, -0.3, -0.15, 0.0, 0.15, 0.3, 0.6]
     span = (width - half) // len(down)
     for index, offset in enumerate(down):
         x = left + half + index * span
         draws[0].rectangle([x, y + mm(2.4), x + mm(2.6), y + mm(2.7)], fill=(*INK, 255))
         shifted = y + mm(2.4) + int(mm(1.0) * offset)
         draws[1].rectangle([x + mm(3.0), shifted, x + mm(5.6), shifted + mm(0.3)], fill=(*INK, 255))
-        first.text((x, y + mm(6.0)), f"{offset:+.1f}", font=tiny, fill=(*INK, 255))
+        first.text((x, y + mm(6.0)), f"{offset:+.2f}", font=tiny, fill=(*INK, 255))
 
     for draw in draws:
         corner_marks(draw, canvas_w, canvas_h)
