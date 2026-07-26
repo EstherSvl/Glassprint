@@ -329,7 +329,10 @@ GLAZE_INKS = [
     ("C", (0, 158, 224)),
     ("M", (226, 0, 122)),
     ("Y", (255, 237, 0)),
-    ("50K", (128, 128, 128)),
+    # Pure black, not mid grey: one pass read as dark grey on glass, so whether
+    # a second or third gets to a real black is worth a row of its own. It has to
+    # be exactly zero — near-black is a different, weaker ink mix on this printer.
+    ("K", (0, 0, 0)),
 ]
 
 #: Pairs laid one over the other. Whether these overlaps land where the model
@@ -338,7 +341,7 @@ GLAZE_PAIRS = [
     (("C", (0, 158, 224)), ("M", (226, 0, 122))),
     (("C", (0, 158, 224)), ("Y", (255, 237, 0))),
     (("M", (226, 0, 122)), ("Y", (255, 237, 0))),
-    (("M", (226, 0, 122)), ("50K", (128, 128, 128))),
+    (("M", (226, 0, 122)), ("C", (0, 158, 224))),
 ]
 
 
@@ -376,7 +379,7 @@ def glaze_test(width_mm: float = 110.0, height_mm: float = 80.0) -> list[Raster]
         font=small,
         fill=(*INK, 255),
     )
-    block_w, block_h, gap = mm(15.0), mm(8.0), mm(2.0)
+    block_w, block_h, gap = mm(15.0), mm(7.0), mm(1.6)
     top = mm(11.5)
     for depth in range(1, 5):
         first.text(
@@ -412,17 +415,35 @@ def glaze_test(width_mm: float = 110.0, height_mm: float = 80.0) -> list[Raster]
         )
         first.text((x, y + mm(10.4)), f"{name_a} then {name_b}", font=tiny, fill=(*INK, 255))
 
+    # -- 3. registration, measured rather than eyeballed ---------------------
+    #
+    # Four crosses printed on top of each other only get thicker; they cannot
+    # say by how much anything moved. This is a vernier: pass 1 lays the upper
+    # bars, pass 2 the lower ones at known offsets, and whichever pair lines up
+    # is the drift. Bars are 0.3mm because 0.1mm hairlines thicken under
+    # overspray, which is exactly the error being measured.
+    y += mm(13.0)
+    first.text((left, y), "3  registration — which pair lines up? that is the drift", font=small, fill=(*INK, 255))
+    y += mm(2.6)
+    offsets = [-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3]
+    span = width // len(offsets)
+    for index, offset in enumerate(offsets):
+        x = left + index * span + span // 3
+        draws[0].rectangle([x, y, x + mm(0.3), y + mm(3.0)], fill=(*INK, 255))
+        shifted = x + mm(offset) if offset >= 0 else x - mm(-offset)
+        draws[1].rectangle([shifted, y + mm(3.4), shifted + mm(0.3), y + mm(6.4)], fill=(*INK, 255))
+        first.text((x - mm(1.4), y + mm(6.8)), f"{offset:+.1f}", font=tiny, fill=(*INK, 255))
+
     for draw in draws:
         corner_marks(draw, canvas_w, canvas_h)
 
-    # Staggered down the corner, so four prints on one piece of glass read as a
-    # tally of what actually went down rather than one blur.
+    # Staggered, so four prints on one piece of glass read as a tally of what
+    # actually went down rather than one blur. Beside the depth grid rather than
+    # in the corner, where it was landing on the vernier's last label.
+    tally_x = left + 4 * (block_w + gap) + mm(6.0)
     for index in range(1, 5):
         draws[index - 1].text(
-            (canvas_w - left - mm(10.0), canvas_h - mm(12.0) + mm(index * 2.2)),
-            f"pass {index}",
-            font=tiny,
-            fill=(*INK, 255),
+            (tally_x, top + mm(index * 2.4)), f"pass {index}", font=tiny, fill=(*INK, 255)
         )
 
     return [Raster(np.array(page, dtype=np.uint8), dpi=(DPI, DPI)) for page in pages]
