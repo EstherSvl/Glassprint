@@ -323,6 +323,112 @@ def black_test(width_mm: float = 134.0, height_mm: float = 70.0, substrate: str 
     return Raster(np.array(canvas, dtype=np.uint8), dpi=(DPI, DPI), name="glassprint-black")
 
 
+# -- the white underbase ----------------------------------------------------
+
+#: Colours for the fidelity row, which is the point of a white base at all.
+WHITE_TEST_INKS = [
+    ("C", (0, 158, 224)),
+    ("M", (226, 0, 122)),
+    ("Y", (255, 237, 0)),
+    ("K", (0, 0, 0)),
+    ("R", (200, 40, 40)),
+    ("G", (40, 150, 80)),
+    ("B", (40, 70, 180)),
+    ("50%", (128, 128, 128)),
+]
+
+
+def white_test(width_mm: float = 140.0, height_mm: float = 46.0) -> Raster:
+    """How much white to put underneath — and what the in-between looks like.
+
+    All the glaze work so far has been at one end of a dial: no white at all,
+    where the glass supplies the colour and the piece is genuinely transparent.
+    The other end is five layers of white, where the glass has stopped
+    mattering and the machine is printing on something that behaves like card.
+    The first plate printed here was at that end, and the tests since have all
+    been at the other.
+
+    Nobody has looked at the middle, and the middle is the part a UV printer on
+    glass can do that neither paper nor a lightbox can: a base thin enough to
+    still pass light, so the piece reads one way lit from behind and another way
+    lit from the front. That is a material effect, not a colour-accuracy one,
+    and it will not show up in any measurement taken through a lightbox alone.
+
+    The file cannot set the layer count — that is a printer setting — so this
+    tile is meant to be printed several times, once per setting, and the title
+    has a blank to write it in. What the file *can* vary is alpha, which is what
+    drives the underbase, so that gets a row of its own: if alpha thins the white
+    as well as the colour, the dial is in the artwork and not only in the RIP.
+
+    Read every plate twice: once against a black card, which shows how opaque
+    the base is, and once backlit, which shows how much light still gets past.
+    """
+    canvas_w, canvas_h = mm(width_mm), mm(height_mm)
+    canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+
+    small, tiny = font(1.4), font(1.1)
+    left = mm(MARGIN_MM)
+    width = canvas_w - 2 * left
+    y = MARGIN_MM
+
+    def label(text: str, x: int, top_mm: float, chosen=None) -> None:
+        draw.text((x, mm(top_mm)), text, font=chosen or small, fill=(*INK, 255))
+
+    label(f"glassprint white base · {width_mm:.0f}x{height_mm:.0f}mm · layers of white: ______", left + mm(3.5), y)
+    y += 2.4
+    draw.rectangle([left, mm(y), left + mm(10), mm(y) + mm(0.7)], fill=(*INK, 255))
+    label("10mm · write the setting above before you put it down", left + mm(11), y - 0.3, tiny)
+    y += 2.6
+
+    # -- 1. how opaque is the base on its own? -------------------------------
+    #
+    # White ink and nothing else. Against a black card this reads as white if
+    # the base is covering and grey if it is not, which is the whole question
+    # and needs no instrument to answer.
+    label("1  white alone — photograph against black card, then against light", left, y)
+    y += 2.0
+    block_w = width // 6
+    for index, alpha in enumerate([100, 80, 60, 40, 25, 10]):
+        x = left + index * block_w
+        draw.rectangle(
+            [x, mm(y), x + block_w - mm(1.2), mm(y + 6.2)],
+            fill=(255, 255, 255, round(alpha * 2.55)),
+        )
+        label(f"{alpha}", x + mm(0.3), y + 6.4, tiny)
+    y += 9.4
+
+    # -- 2. colour over the base ---------------------------------------------
+    label("2  colour at 100% over the base — compare with the same swatches on bare glass", left, y)
+    y += 2.0
+    swatch = width // len(WHITE_TEST_INKS)
+    for index, (name, rgb) in enumerate(WHITE_TEST_INKS):
+        x = left + index * swatch
+        draw.rectangle([x, mm(y), x + swatch - mm(0.8), mm(y + 6.0)], fill=(*rgb, 255))
+        label(name, x + mm(0.3), y + 6.2, tiny)
+    y += 9.0
+
+    # -- 3. does alpha thin the base too? ------------------------------------
+    label("3  black at falling alpha — does the white thin with it, or stop at once?", left, y)
+    y += 2.0
+    step = width // len(TONES)
+    for index, percent in enumerate(TONES):
+        x = left + index * step
+        draw.rectangle(
+            [x, mm(y), x + step - mm(0.5), mm(y + 5.6)], fill=(*INK, round(percent * 2.55))
+        )
+        label(str(percent), x + mm(0.2), y + 5.8, tiny)
+    y += 8.0
+
+    if y > height_mm - MARGIN_MM:
+        raise SystemExit(
+            f"{width_mm:.0f}x{height_mm:.0f} overflows: needs {y:.1f}mm of {height_mm:.0f}mm"
+        )
+
+    corner_marks(draw, canvas_w, canvas_h)
+    return Raster(np.array(canvas, dtype=np.uint8), dpi=(DPI, DPI))
+
+
 # -- the glaze test ---------------------------------------------------------
 
 GLAZE_INKS = [
@@ -497,12 +603,21 @@ def main() -> int:
     # reader has to look in exactly the places the printer put things.
     from glassprint.measure import CHART, chart as colour_chart
 
-    tile = colour_chart(dpi=DPI)
-    out = OUT / "glassprint-colour-chart.png"
+    for white_base, name in [(False, "no-white"), (True, "with-white")]:
+        tile = colour_chart(dpi=DPI, white_base=white_base)
+        out = OUT / f"glassprint-colour-chart-{name}.png"
+        tile.save(out, fmt="png", dpi=(DPI, DPI))
+        print(
+            f"{out.name:38} {tile.width}x{tile.height}px  "
+            f"{px_mm(tile.width):.0f}x{px_mm(tile.height):.0f}mm"
+        )
+
+    tile = white_test()
+    out = OUT / "glassprint-white-base.png"
     tile.save(out, fmt="png", dpi=(DPI, DPI))
     print(
         f"{out.name:38} {tile.width}x{tile.height}px  "
-        f"{px_mm(tile.width):.0f}x{px_mm(tile.height):.0f}mm"
+        f"{px_mm(tile.width):.0f}x{px_mm(tile.height):.0f}mm  (print once per white setting)"
     )
 
     passes = glaze_test()

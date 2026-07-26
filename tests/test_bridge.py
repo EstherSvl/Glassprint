@@ -243,3 +243,21 @@ def test_a_photograph_with_no_chart_in_it_says_what_to_do():
     Image.new("RGB", (900, 600), (238, 238, 238)).save(buffer, "PNG")
     error = _call("calibrate", {"data": base64.b64encode(buffer.getvalue()).decode()})
     assert "error" in error and "chart" in error["error"]
+
+
+def test_the_white_base_chart_is_a_different_file_and_different_advice():
+    plain = _call("chart", {})["ok"]
+    based = _call("chart", {"white_base": True})["ok"]
+    assert plain["file"] != based["file"]
+    assert plain["data"] != based["data"]
+    assert based["white_base"] is True
+    # The lighting has to match the substrate: an opaque base has nothing to
+    # backlight, and shooting it that way measures nothing.
+    assert any("front" in line for line in based["instructions"])
+    assert not any("front" in line for line in plain["instructions"])
+
+
+def test_a_white_base_profile_is_recorded_as_one():
+    report = _call("calibrate", {"data": _photo_b64(), "white_base": True})["ok"]["report"]
+    assert report["substrate"] == "white"
+    assert _call("calibrate", {"data": _photo_b64()})["ok"]["report"]["substrate"] == "glass"

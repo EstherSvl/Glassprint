@@ -396,3 +396,57 @@ def test_a_profile_survives_a_round_trip_through_json():
     assert np.allclose(restored.gamma, profile.gamma, atol=1e-3)
     assert restored.predict((100, 100, 100)) == profile.predict((100, 100, 100))
     assert restored.residuals()["held_out"] == profile.residuals()["held_out"]
+
+
+# -- with a white underbase --------------------------------------------------
+
+
+def test_the_white_base_chart_prints_its_corners_instead_of_leaving_holes():
+    """The corners are the reference, so they have to be the substrate.
+
+    With a white base, a corner left as a hole is bare glass while every patch
+    beside it sits on white ink. Dividing one by the other is not a measurement
+    of the ink; it is two different substrates cancelling badly.
+    """
+    layout = measure.CHART
+    raster = measure.chart(white_base=True)
+    scale = raster.width / layout.width_mm
+    for index in measure.glass_cells(layout):
+        x, y, w, h = layout.cell(index)
+        px = lambda v: int((layout.margin_mm + v) * scale)  # noqa: E731
+        pixel = raster.rgba[px(y + h / 2), px(x + w / 2)]
+        assert tuple(int(v) for v in pixel) == (255, 255, 255, 255)
+
+
+def test_the_two_charts_differ_only_in_their_corners():
+    plain = measure.chart().rgba.astype(int)
+    based = measure.chart(white_base=True).rgba.astype(int)
+    differ = np.any(plain != based, axis=2)
+    layout = measure.CHART
+    scale = plain.shape[1] / layout.width_mm
+    for index in range(layout.columns * layout.rows):
+        x, y, w, h = layout.cell(index)
+        row = int((layout.margin_mm + y + h / 2) * scale)
+        column = int((layout.margin_mm + x + w / 2) * scale)
+        expected = index in measure.glass_cells(layout)
+        assert bool(differ[row, column]) is expected, index
+
+
+def test_a_white_base_profile_ignores_the_glass_colour():
+    """An opaque base has covered the glass. Tinting the prediction anyway
+    would answer a question about a substrate that is no longer there."""
+    profile = measure.read(photograph(), substrate="white")
+    assert profile.substrate == "white"
+    assert profile.predict((128, 64, 32), GREEN) == profile.predict((128, 64, 32), AMBER)
+
+    on_glass = measure.read(photograph())
+    assert on_glass.predict((128, 64, 32), GREEN) != on_glass.predict((128, 64, 32), AMBER)
+
+
+def test_the_substrate_survives_a_round_trip():
+    import json
+
+    profile = measure.read(photograph(), substrate="white")
+    restored = measure.Profile.from_dict(json.loads(profile.to_json()))
+    assert restored.substrate == "white"
+    assert restored.predict((90, 90, 90)) == profile.predict((90, 90, 90))

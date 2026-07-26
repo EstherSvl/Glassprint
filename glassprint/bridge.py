@@ -302,17 +302,36 @@ class Bridge:
         from .measure import CHART, chart
 
         dpi = _float(payload.get("dpi"), 600.0)
-        raster = chart(dpi=dpi, label=str(payload.get("label") or ""))
+        white_base = bool(payload.get("white_base"))
+        raster = chart(dpi=dpi, label=str(payload.get("label") or ""), white_base=white_base)
+
+        # The photograph has to be lit the way the piece will be seen. Ink on
+        # bare glass is a transparency and reads backlit; ink on an opaque white
+        # base is a print and reads front-lit. Shooting either one the other
+        # way measures almost nothing.
+        if white_base:
+            lighting = [
+                "Photograph it flat, lit from the front, on a sheet of white paper — "
+                "an opaque base has nothing to backlight.",
+                "Keep the paper in shot all round the plate: it is the white reference.",
+            ]
+        else:
+            lighting = [
+                "Photograph it flat against a bright white background, with a little "
+                "of that background showing all round the plate.",
+            ]
         return {
-            "file": "glassprint-colour-chart.png",
+            "file": f"glassprint-colour-chart-{'with' if white_base else 'no'}-white.png",
             "data": base64.b64encode(raster.encode(fmt="png", dpi=(dpi, dpi))).decode("ascii"),
             "size_mm": [round(CHART.width_mm, 1), round(CHART.height_mm, 1)],
             "patches": CHART.columns * CHART.rows,
+            "white_base": white_base,
             "instructions": [
-                "Print at 100%, one pass, no white base — the same settings you print artwork with.",
+                "Print at 100%, one pass, "
+                + ("with the white base on" if white_base else "no white base")
+                + " — otherwise the same settings you print artwork with.",
                 f"Any glass at least {CHART.width_mm:.0f} x {CHART.height_mm:.0f}mm will do.",
-                "Photograph it flat against a bright white background, with a little "
-                "of that background showing all round the plate.",
+                *lighting,
                 "No flash, no HDR, and nothing casting a shadow across the plate.",
             ],
         }
@@ -332,8 +351,9 @@ class Bridge:
             raise BridgeError(f"Could not read that photograph ({exc}).")
 
         glass = parse_color(payload.get("glass")) if payload.get("glass") else None
+        substrate = "white" if payload.get("white_base") else "glass"
         try:
-            profile = read(photo.rgba[:, :, :3], glass=glass)
+            profile = read(photo.rgba[:, :, :3], glass=glass, substrate=substrate)
         except ReadError as exc:
             raise BridgeError(str(exc))
 
@@ -407,6 +427,7 @@ def _profile_report(profile: Any) -> dict[str, Any]:
         )
     return {
         "glass": to_hex(profile.glass),
+        "substrate": profile.substrate,
         "gamma": [round(float(g), 2) for g in profile.gamma],
         "density": [round(float(profile.crosstalk[i][i]), 2) for i in range(3)],
         # How much each ink absorbs outside its own channel, relative to inside

@@ -624,6 +624,57 @@ repeatability  0.2 levels between two prints of one colour
 From the command line, `glassprint chart` and `glassprint calibrate photo.jpg`
 do the same two steps and write the profile as JSON.
 
+### With a white base, or without
+
+Everything above is the *no white base* case, where the glass supplies half the
+colour. That is the hard case, and the interesting one — but it is not the only
+one, and it is not the reliable one.
+
+Put enough white underneath and the glass stops mattering. The substrate is
+opaque, the printer behaves the way it does on card, and colour becomes
+predictable in the ordinary way. That is worth calibrating too, and the same
+chart does it — **tick the white-base box**, or `glassprint chart --white-base`.
+
+One thing has to change, and it is not cosmetic. Every reading is a ratio
+against the four corner cells, so those cells have to *be* the substrate. On
+bare glass they are holes. Over a white base a hole is bare glass while every
+patch beside it sits on white ink, and the ratio between them measures nothing
+at all — so with a white base the corners print solid white instead. The
+profile records which it was, and a white-base profile ignores any glass colour
+you hand it, because the base has covered the glass and tinting the prediction
+would answer a question about a substrate that is no longer there.
+
+The lighting differs too: ink on bare glass is a transparency and reads backlit;
+ink on an opaque base is a print and reads front-lit. The instructions change
+with the box.
+
+### How much white — the dial nobody has turned
+
+Between those two ends is a range nothing has been measured in. Five layers of
+white is card. No white is a transparency. **One or two layers is neither**: a
+base thin enough to still pass light, so the piece reads one way lit from behind
+and another way lit from the front.
+
+That is the effect a UV printer on glass can produce that neither paper nor a
+lightbox can, and no measurement taken through a lightbox alone will show it.
+
+`test-target/glassprint-white-base.png` is the tile for it — 140 × 46mm, meant to
+be **printed several times, once per white setting**, with a blank in the title
+to write the setting in. The layer count is a printer setting, so the file
+cannot vary it; what the file *can* vary is alpha, which is what drives the
+underbase, so that gets a row of its own. If alpha thins the white as well as the
+colour, the dial is in the artwork and not only in the RIP.
+
+| row | question |
+| --- | --- |
+| 1 · white alone | How opaque is the base? Six alpha levels, nothing else printed |
+| 2 · colour over it | Eight swatches, to compare against the same eight on bare glass |
+| 3 · black at falling alpha | Does the white thin with the colour, or stop all at once? |
+
+Photograph every plate **twice** — once against a black card, which shows what
+the base is covering, and once backlit, which shows what still gets through. The
+difference between those two photographs is the whole point of the exercise.
+
 ## Glazing: building colours from different inks
 
 Repeating one ink only ever amplifies its own spectral shape (`ink ** n`), so it

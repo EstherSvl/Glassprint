@@ -405,8 +405,12 @@ function showProfile(report) {
 
   const gamma = report.gamma.map((g) => g.toFixed(2)).join(" · ");
   const better = report.uncalibrated_error_levels / Math.max(report.error_levels, 0.1);
+  const onWhite = report.substrate === "white";
   const rows = [
-    ["glass", `<span class="swatch" style="background:${report.glass}"></span>${report.glass}`],
+    [
+      onWhite ? "white base" : "glass",
+      `<span class="swatch" style="background:${report.glass}"></span>${report.glass}`,
+    ],
     ["tone curve", `${gamma} <span class="hint">r · g · b</span>`],
     ["ink bleed", `${Math.round(report.muddiness * 100)}% outside its own channel`],
     ["accuracy", `${report.error_levels} levels — was ${report.uncalibrated_error_levels}`],
@@ -431,7 +435,10 @@ function showProfile(report) {
 async function getChart() {
   setStatus("drawing the chart…", "busy");
   try {
-    const data = await backend().call("chart", { session_id: state.sessionId });
+    const data = await backend().call("chart", {
+      session_id: state.sessionId,
+      white_base: $("chart-white-base").checked,
+    });
     state.sessionId = data.session_id || state.sessionId;
 
     const bytes = window.GlassprintBackends.base64ToBytes(data.data);
@@ -458,6 +465,7 @@ async function readChart(file) {
       session_id: state.sessionId,
       data: window.GlassprintBackends.bytesToBase64(new Uint8Array(buffer)),
       glass: $("glass-on").checked ? $("glass-color").value : "",
+      white_base: $("chart-white-base").checked,
     });
     state.sessionId = data.session_id || state.sessionId;
     saveProfile(data.profile);

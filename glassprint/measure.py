@@ -129,7 +129,7 @@ BLACK = 0
 
 
 def glass_cells(layout: "Layout") -> tuple[int, int, int, int]:
-    """The four grid corners, which print nothing and read as bare glass.
+    """The four grid corners, which carry the substrate rather than a colour.
 
     One reference in a corner was not enough. A phone's lamp falls off across
     the frame by a fifth or more, so dividing every patch by a single corner
@@ -228,7 +228,12 @@ class Profile:
 
     gamma: np.ndarray                      # (3,) per-channel tone curve
     crosstalk: np.ndarray                  # (3, 3) absorbance mixing
-    glass: RGB                             # the glass it was measured on
+    glass: RGB                             # the substrate it was measured on
+    #: ``"glass"`` for ink straight onto tinted glass, ``"white"`` for ink over
+    #: a white underbase. The maths is identical — a ratio against whatever the
+    #: four corner cells printed — but what the answer *means* is not, and a
+    #: white base makes the glass colour irrelevant rather than merely different.
+    substrate: str = "glass"
     #: Everything measured, kept for reporting rather than for prediction.
     requested: np.ndarray = field(default_factory=lambda: np.zeros((0, 3)))
     measured: np.ndarray = field(default_factory=lambda: np.zeros((0, 3)))
@@ -246,9 +251,17 @@ class Profile:
         absorbance = curved @ self.crosstalk.T
         return np.clip(10.0 ** (-absorbance), _FLOOR, 1.0)
 
+    def _base(self, glass: RGB | None) -> np.ndarray:
+        """What the ink is sitting on. A white underbase hides the glass, so
+        passing a glass colour to a white-base profile is quietly ignored rather
+        than obeyed — obeying it would tint a prediction the base has covered."""
+        if self.substrate == "white":
+            return np.array(self.glass, dtype=np.float64) / 255.0
+        return np.array(glass or self.glass, dtype=np.float64) / 255.0
+
     def predict(self, requested: RGB, glass: RGB | None = None) -> RGB:
-        """What asking for ``requested`` actually looks like on the glass."""
-        glass_t = np.array(glass or self.glass, dtype=np.float64) / 255.0
+        """What asking for ``requested`` actually looks like on the substrate."""
+        glass_t = self._base(glass)
         seen = glass_t * self.transmittance(np.array(requested, dtype=np.float64))
         return tuple(int(round(float(c) * 255)) for c in np.clip(seen, 0.0, 1.0))  # type: ignore[return-value]
 
@@ -256,10 +269,10 @@ class Profile:
         """What to ask for so it comes out ``desired``. Inverts the model exactly.
 
         Returns the colour and whether it was reachable. Ink only subtracts, so
-        anything brighter than the glass is not, and the answer is then the
-        closest the glass allows rather than a number that would mislead.
+        anything brighter than the substrate is not, and the answer is then the
+        closest it allows rather than a number that would mislead.
         """
-        glass_t = np.array(glass or self.glass, dtype=np.float64) / 255.0
+        glass_t = self._base(glass)
         want = np.array(desired, dtype=np.float64) / 255.0
         needed = np.clip(want / np.maximum(glass_t, 1e-6), _FLOOR, 1.0)
         reachable = bool(np.all(want <= glass_t + 0.02))
@@ -319,6 +332,7 @@ class Profile:
             "gamma": [round(float(g), 4) for g in self.gamma],
             "crosstalk": [[round(float(v), 4) for v in row] for row in self.crosstalk],
             "glass": to_hex(self.glass),
+            "substrate": self.substrate,
             "requested": self.requested.astype(int).tolist(),
             "measured": [[round(float(v), 5) for v in row] for row in self.measured],
             "residuals": self.residuals(),
@@ -337,6 +351,7 @@ class Profile:
             gamma=np.array(data["gamma"], dtype=np.float64),
             crosstalk=np.array(data["crosstalk"], dtype=np.float64),
             glass=glass,
+            substrate=str(data.get("substrate") or "glass"),
             requested=np.array(data.get("requested", []), dtype=np.float64).reshape(-1, 3),
             measured=np.array(data.get("measured", []), dtype=np.float64).reshape(-1, 3),
             note=data.get("note", ""),
@@ -355,7 +370,14 @@ class Profile:
 # how far off it was rather than dressing it up as a calibration.
 
 
-def fit(requested: np.ndarray, measured: np.ndarray, glass: RGB, *, note: str = "") -> Profile:
+def fit(
+    requested: np.ndarray,
+    measured: np.ndarray,
+    glass: RGB,
+    *,
+    note: str = "",
+    substrate: str = "glass",
+) -> Profile:
     """Fit the twelve numbers to measured transmittances.
 
     ``measured`` is the ink's transmittance — the patch divided by bare glass,
@@ -392,6 +414,7 @@ def fit(requested: np.ndarray, measured: np.ndarray, glass: RGB, *, note: str = 
         gamma=gamma,
         crosstalk=crosstalk,
         glass=glass,
+        substrate=substrate,
         requested=requested,
         measured=measured,
         note=note,
@@ -552,6 +575,7 @@ def read(
     *,
     glass: RGB | None = None,
     layout: Layout = CHART,
+    substrate: str = "glass",
 ) -> Profile:
     """Measure a printed chart from a photograph of it.
 
@@ -625,7 +649,7 @@ def read(
         measured_glass = (255, 255, 255)
         note = "measured, but the glass colour could not be read — include some background around the plate"
 
-    return fit(requested, ink, measured_glass, note=note)
+    return fit(requested, ink, measured_glass, note=note, substrate=substrate)
 
 
 def _glass_from_background(
@@ -683,13 +707,27 @@ def _glass_from_background(
 # -- the printable -----------------------------------------------------------
 
 
-def chart(layout: Layout = CHART, *, dpi: float = 600.0, label: str = ""):
-    """Draw the chart to print. One pass, no white base, no registration to get wrong.
+def chart(
+    layout: Layout = CHART,
+    *,
+    dpi: float = 600.0,
+    label: str = "",
+    white_base: bool = False,
+):
+    """Draw the chart to print. One pass, no registration to get wrong.
 
     Returns a :class:`~glassprint.raster.Raster`. Deliberately a single pass:
     this measures what one layer of ink does, which is the thing every other
     prediction is built out of, and asking for four passes would put the
     plate's registration between the question and the answer.
+
+    ``white_base`` is not cosmetic. Everything is measured as a ratio against
+    the four corner cells, so those cells have to *be* the substrate. Printed
+    with a white underbase, a corner left as a hole is bare glass while every
+    patch beside it sits on white ink — and the ratio between them is then two
+    different substrates divided by each other, which is not a measurement of
+    anything. So with a white base the corners print solid white instead, and
+    the reference becomes the base as the printer actually lays it down.
     """
     from PIL import Image, ImageDraw
 
@@ -709,17 +747,17 @@ def chart(layout: Layout = CHART, *, dpi: float = 600.0, label: str = ""):
         [origin, origin, origin + px(layout.frame_w_mm) - 1, origin + px(layout.frame_h_mm) - 1],
         fill=(0, 0, 0, 255),
     )
-    for index, colour in enumerate(patches()):
+    substrate = (255, 255, 255, 255) if white_base else (0, 0, 0, 0)
+    for index, colour in enumerate(patches(layout)):
         x, y, w, h = layout.cell(index)
         box = [origin + px(x), origin + px(y), origin + px(x + w) - 1, origin + px(y + h) - 1]
-        # Bare glass is a hole in the mesh, not a pale patch: anything printed
-        # there would be measured as if it were the substrate.
-        draw.rectangle(box, fill=(*colour, 255) if colour else (0, 0, 0, 0))
+        draw.rectangle(box, fill=(*colour, 255) if colour else substrate)
 
     # The caption is the only part that can fail — in the browser build there
     # are no system fonts to load. A chart without its caption is still a
     # perfectly good chart, so it must not take the rest down with it.
-    caption = label or "glassprint colour chart · one pass · no white base · 100%"
+    base = "WITH white base" if white_base else "NO white base"
+    caption = label or f"glassprint colour chart · one pass · {base} · 100%"
     try:
         draw.text(
             (origin, origin + px(layout.frame_h_mm) + px(0.8)),
