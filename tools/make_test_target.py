@@ -28,8 +28,11 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "test-target"
 
 # Small on purpose: it has to fit any bed, and a calibration print should cost
-# a scrap of glass and a thimble of ink, not a good sheet.
+# a scrap of glass and a thimble of ink, not a good sheet. The wide variant is
+# cut to the mini flatbed, where a 300mm ramp resolves banding that a 70mm one
+# hides entirely.
 SIZE_MM = 80.0
+SHAPES = {"tile": (80.0, 80.0), "strip": (320.0, 85.0)}
 DPI = 600.0
 MARGIN_MM = 4.0
 
@@ -60,6 +63,10 @@ def mm(value: float) -> int:
     return mm_to_px(value, DPI)
 
 
+def px_mm(pixels: int) -> float:
+    return pixels / DPI * 25.4
+
+
 def font(points: float) -> ImageFont.FreeTypeFont:
     """A size in millimetres of cap height, near enough."""
     try:
@@ -68,24 +75,24 @@ def font(points: float) -> ImageFont.FreeTypeFont:
         return ImageFont.load_default(size=mm(points))
 
 
-def build(variant: str) -> Raster:
-    side = mm(SIZE_MM)
+def build(variant: str, width_mm: float = SIZE_MM, height_mm: float = SIZE_MM) -> Raster:
+    canvas_w, canvas_h = mm(width_mm), mm(height_mm)
     # Transparent: on this printer the alpha channel is what generates the white
     # underbase, so the tile has to carry its tone as alpha, not as pale ink.
-    canvas = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+    canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
 
     small = font(1.4)
     tiny = font(1.1)
     left = mm(MARGIN_MM)
-    width = side - 2 * left
+    width = canvas_w - 2 * left
     y = MARGIN_MM  # tracked in millimetres, so the budget below is readable
 
     def label(text: str, x: int, top_mm: float, chosen=None) -> None:
         draw.text((x, mm(top_mm)), text, font=chosen or small, fill=(*INK, 255))
 
     # -- title and scale bar -------------------------------------------------
-    label(f"glassprint calibration · {SIZE_MM:.0f}mm · {DPI:.0f}dpi · {variant}", left, y)
+    label(f"glassprint calibration · {width_mm:.0f}×{height_mm:.0f}mm · {DPI:.0f}dpi · {variant}", left, y)
     y += 2.4
     draw.rectangle([left, mm(y), left + mm(10), mm(y) + mm(0.7)], fill=(*INK, 255))
     label("10mm — measure this", left + mm(11), y - 0.3, tiny)
@@ -121,8 +128,8 @@ def build(variant: str) -> Raster:
         x = left + index * (patch + gap)
         block = np.full((patch, patch), 0.5, dtype=np.float32)
         paste_mask(canvas, halftone(block, mm(pitch), angle=45.0), x, mm(y))
-        label(f"{pitch}", x, y + 8.2, tiny)
-    y += 11.4
+        label(f"{pitch}", x, y + px_mm(patch) + 0.2, tiny)
+    y += px_mm(patch) + 3.4
 
     # -- 4. solid colour, for what the glass does to it -----------------------
     label("4  solid colour — photograph against light and against dark", left, y)
@@ -137,12 +144,14 @@ def build(variant: str) -> Raster:
     # -- 5. fine detail -------------------------------------------------------
     label("5  line width in mm — the thinnest that survives", left, y)
     y += 2.2
-    x = left
-    for thickness in LINES:
+    # Spread rather than huddled: on the wide strip a fixed gap would leave the
+    # lines in one corner with a hand's width of empty glass beside them.
+    spacing = min(mm(8.0), width // len(LINES))
+    for index, thickness in enumerate(LINES):
+        x = left + index * spacing
         w = max(1, mm(thickness))
         draw.rectangle([x, mm(y), x + w - 1, mm(y + 5.0)], fill=(*INK, 255))
         label(f"{thickness}", x - mm(0.4), y + 5.2, tiny)
-        x += w + mm(3.4)
     y += 8.4
 
     # -- 6. a continuous fade, which is the thing this is all for -------------
@@ -156,16 +165,16 @@ def build(variant: str) -> Raster:
 
     # Laying this out by hand is exactly the sort of thing that silently runs
     # off the edge, and a calibration tile with a row missing is worse than none.
-    if y > SIZE_MM - MARGIN_MM:
-        raise SystemExit(f"layout overflows: needs {y:.1f}mm of {SIZE_MM - MARGIN_MM:.1f}mm")
+    if y > height_mm - MARGIN_MM:
+        raise SystemExit(f"layout overflows: needs {y:.1f}mm of {height_mm - MARGIN_MM:.1f}mm")
 
     # A hairline cross in each corner: print this twice and these say how far
     # the second pass landed from the first.
     for cx, cy in [
         (left, mm(MARGIN_MM)),
-        (side - left, mm(MARGIN_MM)),
-        (left, side - mm(MARGIN_MM)),
-        (side - left, side - mm(MARGIN_MM)),
+        (canvas_w - left, mm(MARGIN_MM)),
+        (left, canvas_h - mm(MARGIN_MM)),
+        (canvas_w - left, canvas_h - mm(MARGIN_MM)),
     ]:
         arm, w = mm(2.0), max(1, mm(0.1))
         draw.rectangle([cx - arm, cy - w // 2, cx + arm, cy + w // 2], fill=(*INK, 255))
@@ -224,10 +233,12 @@ def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     # Two files, identical but for the label. Printed and set aside, two pieces
     # of glass are otherwise impossible to tell apart a week later.
-    for variant, name in [("WITH white base", "with-white"), ("NO white base", "no-white")]:
-        tile = build(variant)
-        tile.save(OUT / f"glassprint-test-{name}.png", fmt="png", dpi=(DPI, DPI))
-        print(f"glassprint-test-{name}.png  {tile.width}×{tile.height}px  {SIZE_MM:.0f}×{SIZE_MM:.0f}mm")
+    for shape, (width_mm, height_mm) in SHAPES.items():
+        for variant, name in [("WITH white base", "with-white"), ("NO white base", "no-white")]:
+            tile = build(variant, width_mm, height_mm)
+            out = OUT / f"glassprint-{shape}-{name}.png"
+            tile.save(out, fmt="png", dpi=(DPI, DPI))
+            print(f"{out.name}  {tile.width}×{tile.height}px  {width_mm:.0f}×{height_mm:.0f}mm")
 
     for index, raster in enumerate(stack_test(), start=1):
         name = f"glassprint-stack-pass{index}of4.png"
