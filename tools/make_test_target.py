@@ -205,41 +205,99 @@ def paste_mask(canvas: Image.Image, mask: np.ndarray, x: int, y: int) -> None:
     canvas.alpha_composite(Image.fromarray(rgba, mode="RGBA"), (x, y))
 
 
-def stack_test() -> list[Raster]:
-    """Four identical files, for printing one on top of another.
+#: The glaze primaries, plus a grey. Black is in there deliberately: it should
+#: saturate almost immediately, and knowing that stacking it is pointless is
+#: worth one row.
+GLAZE_INKS = [("C", (0, 158, 224)), ("M", (226, 0, 122)), ("Y", (255, 237, 0)), ("50K", (128, 128, 128))]
 
-    Glazing depends on repeated passes landing on each other and on ink
-    genuinely deepening when it does. Printing these in order answers both:
-    how far registration drifts, and whether pass four looks meaningfully
-    different from pass two.
+#: Pairs laid one over the other. Whether these overlaps land where the model
+#: predicts is the question the whole glaze solver hangs on.
+GLAZE_PAIRS = [
+    (("C", (0, 158, 224)), ("M", (226, 0, 122))),
+    (("C", (0, 158, 224)), ("Y", (255, 237, 0))),
+    (("M", (226, 0, 122)), ("Y", (255, 237, 0))),
+    (("C", (0, 158, 224)), ("C", (0, 158, 224))),
+    (("M", (226, 0, 122)), ("50K", (128, 128, 128))),
+    (("Y", (255, 237, 0)), ("50K", (128, 128, 128))),
+]
+
+
+def glaze_test() -> list[Raster]:
+    """Four files to print one over another, without moving the glass.
+
+    Two questions, both unanswerable from a single pass. Does repeating an ink
+    deepen it the way the model says, and does one colour over another multiply
+    the way the model says? The second is the load-bearing one: every recipe
+    the glaze solver produces assumes it.
+
+    Drawn in colour rather than near-black on purpose. Black is all but opaque
+    after one pass, so a depth series in black shows four blocks that look
+    identical and teaches nothing.
     """
-    side = mm(40.0)
-    out = []
+    width_mm, height_mm = 160.0, 85.0
+    canvas_w, canvas_h = mm(width_mm), mm(height_mm)
+    left = mm(MARGIN_MM)
+
+    pages = [Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0)) for _ in range(4)]
+    draws = [ImageDraw.Draw(page) for page in pages]
+    # Labels go on pass 1 alone: printed four times over they would cure into
+    # an illegible smudge.
+    first = draws[0]
+    tiny, small = font(1.1), font(1.4)
+
+    first.text((left + mm(4.0), mm(5.0)), "glassprint glaze test · 160x85mm · print all four, in order, without moving the glass", font=small, fill=(20, 20, 24, 255))
+
+    # -- 1. depth: the same ink, one to four passes --------------------------
+    first.text((left, mm(9.0)), "1  same ink, 1-4 passes — where does it stop deepening?", font=small, fill=(20, 20, 24, 255))
+    block_w, block_h, gap = mm(14.0), mm(8.0), mm(2.0)
+    top = mm(12.5)
+    for depth in range(1, 5):
+        first.text((left + (depth - 1) * (block_w + gap) + mm(5.5), mm(11.0)), str(depth), font=tiny, fill=(20, 20, 24, 255))
+    for row, (name, rgb) in enumerate(GLAZE_INKS):
+        y = top + row * (block_h + gap)
+        for depth in range(1, 5):
+            x = left + (depth - 1) * (block_w + gap)
+            # Block *depth* takes ink on every pass up to and including depth.
+            for index in range(depth):
+                draws[index].rectangle([x, y, x + block_w, y + block_h], fill=(*rgb, 255))
+        first.text((left + 4 * (block_w + gap) + mm(1.0), y + mm(2.5)), name, font=tiny, fill=(20, 20, 24, 255))
+
+    # -- 2. pairs: one colour over another -----------------------------------
+    y = top + 4 * (block_h + gap) + mm(4.0)
+    first.text((left, y), "2  one colour over another — is the overlap what the tool predicts?", font=small, fill=(20, 20, 24, 255))
+    y += mm(3.0)
+    cell = (canvas_w - 2 * left) // len(GLAZE_PAIRS)
+    for index, ((name_a, rgb_a), (name_b, rgb_b)) in enumerate(GLAZE_PAIRS):
+        x = left + index * cell
+        # Offset halves, so each cell reads: A alone, both, B alone.
+        draws[0].rectangle([x, y, x + int(cell * 0.62), y + mm(11.0)], fill=(*rgb_a, 255))
+        draws[1].rectangle([x + int(cell * 0.38), y, x + cell - mm(1.5), y + mm(11.0)], fill=(*rgb_b, 255))
+        first.text((x, y + mm(11.4)), f"{name_a} then {name_b}", font=tiny, fill=(20, 20, 24, 255))
+
+    # Every pass carries the same hairlines, so four prints on one piece of
+    # glass measure exactly how far the registration wandered.
+    for draw in draws:
+        arm, w = mm(2.5), max(1, mm(0.1))
+        for cx, cy in [
+            (left, mm(MARGIN_MM)),
+            (canvas_w - left, mm(MARGIN_MM)),
+            (left, canvas_h - mm(MARGIN_MM)),
+            (canvas_w - left, canvas_h - mm(MARGIN_MM)),
+        ]:
+            draw.rectangle([cx - arm, cy - w // 2, cx + arm, cy + w // 2], fill=(20, 20, 24, 255))
+            draw.rectangle([cx - w // 2, cy - arm, cx + w // 2, cy + arm], fill=(20, 20, 24, 255))
+
+    # Staggered down the corner, so all four printed on one piece of glass read
+    # as a tally of what actually went down rather than one black blur.
     for index in range(1, 5):
-        canvas = Image.new("RGBA", (side, side), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(canvas)
-        # Each pass covers a shorter column, so one print shows all four depths
-        # side by side and registration shows up along their shared edges.
-        for column in range(4):
-            if column + 1 >= index:
-                x = mm(4 + column * 8)
-                draw.rectangle([x, mm(6), x + mm(7), mm(30)], fill=(*INK, 255))
-        # Staggered, because all four print onto the same glass: overlapping
-        # text would cure into one black smudge instead of a legible tally.
-        draw.text((mm(4), mm(30.4 + index * 1.9)), f"pass {index}", font=font(1.3), fill=(*INK, 255))
-        if index == 1:
-            # Drawn once only, for the same reason: this says how many layers
-            # each column ends up with once all four have gone down.
-            for column in range(4):
-                draw.text(
-                    (mm(6 + column * 8), mm(2)), f"{column + 1}", font=font(1.5), fill=(*INK, 255)
-                )
-        arm, w = mm(1.5), max(1, mm(0.1))
-        for cx, cy in [(mm(3), mm(3)), (side - mm(3), mm(3))]:
-            draw.rectangle([cx - arm, cy - w // 2, cx + arm, cy + w // 2], fill=(*INK, 255))
-            draw.rectangle([cx - w // 2, cy - arm, cx + w // 2, cy + arm], fill=(*INK, 255))
-        out.append(Raster(np.array(canvas, dtype=np.uint8), dpi=(DPI, DPI)))
-    return out
+        draws[index - 1].text(
+            (canvas_w - left - mm(12.0), canvas_h - mm(14.0) + mm(index * 2.4)),
+            f"pass {index}",
+            font=tiny,
+            fill=(20, 20, 24, 255),
+        )
+
+    return [Raster(np.array(page, dtype=np.uint8), dpi=(DPI, DPI)) for page in pages]
 
 
 def main() -> int:
@@ -253,10 +311,10 @@ def main() -> int:
             tile.save(out, fmt="png", dpi=(DPI, DPI))
             print(f"{out.name}  {tile.width}×{tile.height}px  {width_mm:.0f}×{height_mm:.0f}mm")
 
-    for index, raster in enumerate(stack_test(), start=1):
-        name = f"glassprint-stack-pass{index}of4.png"
+    for index, raster in enumerate(glaze_test(), start=1):
+        name = f"glassprint-glaze-pass{index}of4.png"
         raster.save(OUT / name, fmt="png", dpi=(DPI, DPI))
-    print(f"glassprint-stack-pass1..4of4.png  40×40mm each")
+    print("glassprint-glaze-pass1..4of4.png  160×85mm each")
     return 0
 
 
