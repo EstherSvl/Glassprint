@@ -398,6 +398,35 @@ The selector runs against the *source* artwork, before any recolouring, so
 It is then tiled in step with the pattern. If nothing matches, the fade is left
 off and the tool says so rather than quietly fading everything.
 
+### What the printer actually does
+
+Everything above was reasoned from how UV printing works. Then it got printed —
+one 110×80mm tile on green glass, no white base, on a EufyMake E1 — and one of
+the assumptions turned out to be wrong in kind, not merely in degree.
+
+| Measured | Result |
+| --- | --- |
+| **Partial alpha** | Prints **nothing** below ~50%. A cliff, not a gradient |
+| **Dot coverage** | Prints cleanly down to ~12% |
+| **Dot pitch** | 0.25mm bridges into blotches · 0.4mm weak · 0.6mm+ clean |
+| **Line width** | Everything from 0.08mm printed; 0.2mm+ is dependable |
+| **Text** | 1.8mm cap height reads well · 1.2mm marginal · 0.8mm illegible |
+| **Solid black** | Comes out dark grey — one pass of ink is thin |
+| **Physical size** | Correct. 110mm printed as 110mm |
+| **Overspray** | A faint residue beside printed areas |
+
+Two independent rows on the same tile agree on the alpha figure: a stepped ramp
+stopped after its 45% patch, and a continuous ramp stopped at half its length.
+
+**This is why tone has to come from coverage.** A tonal fade does not fade on
+this machine — it runs at roughly half strength and then vanishes mid-ramp. The
+same tones rendered as a dot screen printed four times further down the range.
+Dissolve, dot screen and ink layers all work by varying *how much*
+full-strength ink there is, and all three were unaffected.
+
+`glassprint.fade.check()` reports it when a plan crosses those lines, and the
+numbers live in `ALPHA_CLIFF`, `COVERAGE_FLOOR` and `MIN_HALFTONE_MM`.
+
 ### Watching the printable floor
 
 UV dithering starts breaking up under roughly 12% coverage. The readout reports

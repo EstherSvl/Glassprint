@@ -14,7 +14,7 @@ from scipy import ndimage
 from . import fade as fade_module
 from .colors import parse_color, to_hex
 from . import masks, nl, pattern, recolor, segment
-from .fade import Fade
+from .fade import Fade, check as fade_check
 from .glaze import GlazePlan, palette_from, plan as glaze_plan_for
 from .pattern import Box, PatternInfo, Placement
 from .raster import MM_PER_INCH, Raster
@@ -100,7 +100,10 @@ class ComposeResult:
 
         Measured only where the artwork was solid to begin with, so soft
         anti-aliased edges — which every image has — do not drag it to zero.
-        Under roughly 0.12 the printer's dither starts breaking up.
+
+        Read this against :data:`glassprint.fade.ALPHA_CLIFF`, not against a
+        dither floor: on a EufyMake E1 anything under about 50% alpha prints as
+        nothing at all.
         """
         return self.faintest_ink
 
@@ -135,7 +138,7 @@ class ComposeResult:
                 "cutoff": self.fade.cutoff,
                 "layers": self.fade.layers,
                 # The faintest ink that will actually be laid down. Under about
-                # 0.12 the printer's dither starts to break up.
+                # 50% alpha the E1 prints nothing — see fade.ALPHA_CLIFF.
                 "faintest_alpha": self.faintest_alpha(),
             },
             "glaze": self.glaze_plan.as_dict() if self.glaze_plan else None,
@@ -271,6 +274,7 @@ def compose(
         elif spec.fade.screened:
             opacity_field, screen_notes = _screen(opacity_field, base, spec)
             notes.extend(screen_notes)
+        notes.extend(fade_check(spec.fade))
         scope, scope_note = _fade_scope(overlay, cutout, base, box, spec, info, backends)
         if scope_note:
             notes.append(scope_note)

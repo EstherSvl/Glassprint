@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from glassprint import ComposeSpec, Fade, Placement, compose
+from glassprint import fade as fade_module
 from glassprint.fade import apply, apply_cutoff, ramp
 
 CANVAS = (100, 100)
@@ -294,3 +295,44 @@ def test_cutoff_applies_without_a_fade(base_shape, pattern_art):
     alpha = result.overlay_layer.alpha_f
     present = alpha[alpha > 0]
     assert present.min() >= 0.3
+
+
+# -- what the printer actually does -----------------------------------------
+#
+# These pin measurements taken from a real print on a EufyMake E1, not
+# reasoning. A stepped alpha ramp stopped after its 45% patch and a continuous
+# one stopped at half its length, while the screened row carrying the same tones
+# was still printing at 12% coverage.
+
+
+def test_a_tonal_fade_to_nothing_is_flagged_as_impossible():
+    """It does not fade — it runs at half strength and then stops dead."""
+    notes = fade_module.check(Fade(mode="linear", start=0.0, end=1.0))
+    assert any("stop dead" in note for note in notes)
+    assert any("dot screen" in note for note in notes)
+
+
+def test_a_shallow_tonal_fade_is_left_alone():
+    """Staying above the cliff is a legitimate, if subtle, fade."""
+    assert fade_module.check(Fade(mode="linear", min_alpha=0.6)) == []
+
+
+def test_carrying_the_tail_with_coverage_clears_the_warning():
+    for carried in (
+        Fade(mode="linear", halftone_mm=0.8),
+        Fade(mode="linear", layers=3),
+        Fade(mode="linear", dissolve=1.0),
+    ):
+        assert fade_module.check(carried) == [], carried
+
+
+def test_too_fine_a_screen_is_flagged():
+    notes = fade_module.check(Fade(mode="linear", halftone_mm=0.25))
+    assert any("bridge" in note for note in notes)
+    assert fade_module.check(Fade(mode="linear", halftone_mm=0.6)) == []
+
+
+def test_the_measured_constants_are_what_the_print_showed():
+    assert fade_module.ALPHA_CLIFF == 0.5
+    assert fade_module.COVERAGE_FLOOR == 0.12
+    assert fade_module.MIN_HALFTONE_MM == 0.6

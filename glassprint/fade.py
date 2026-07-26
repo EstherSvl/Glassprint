@@ -9,13 +9,24 @@ patch with pale ink on it — a sticker fading, not ink dissolving.
 
 Two ways to express the fade, and they mix:
 
-* **Tonal** — every element gets more transparent. Smooth, but the tail runs
-  into the printer's dither floor, where coverage goes speckly.
+* **Tonal** — every element gets more transparent. Smooth on screen, and on a
+  EufyMake E1 it stops dead: see ``ALPHA_CLIFF`` below.
 * **Dissolve** — whole elements drop out at an increasing rate while the
-  survivors stay fully opaque. Never enters the speckle zone, and on a
-  repeating pattern it reads as the design thinning out into the glass.
+  survivors stay fully opaque. Tone comes from how *much* full-strength ink
+  there is, which is the only kind of tone this printer renders properly.
 
 ``Fade.dissolve`` is the blend between them.
+
+Measured on a EufyMake E1, printing on green glass (see README):
+
+* Partial alpha is **not** partial ink. Below about 50% it prints nothing at
+  all — a cliff, not a gradient. A tonal fade therefore does not fade; it runs
+  at roughly half strength and then vanishes mid-ramp.
+* Coverage — dot size, dropped elements, dropped passes — works smoothly down
+  to about 12%, four times further than alpha manages.
+
+So tone has to be built from coverage, and the tonal mode is only safe over the
+top half of its range. ``check()`` says so when a plan crosses the line.
 """
 
 from __future__ import annotations
@@ -27,6 +38,59 @@ import numpy as np
 from scipy import ndimage
 
 MODES = ("none", "linear", "radial", "shape")
+
+#: Alpha below which a EufyMake E1 prints nothing whatsoever. Measured twice on
+#: one tile and agreeing to within a couple of percent: a stepped alpha ramp
+#: stopped after the 45% patch, and an independent continuous ramp stopped at
+#: half its length. Not a soft floor where quality degrades — a cliff.
+ALPHA_CLIFF = 0.5
+
+#: Coverage below which a dot screen starts to break up. Same tile: the screened
+#: row was still printing at 12% coverage, where the flat row had been blank for
+#: two thirds of its length.
+COVERAGE_FLOOR = 0.12
+
+#: Finest usable dot pitch in millimetres. At 0.25mm the dots bridged into
+#: blotches — overspray closing the gaps — and 0.4mm printed but weakly. 0.6mm
+#: and coarser came out clean.
+MIN_HALFTONE_MM = 0.6
+
+
+def check(fade: "Fade") -> list[str]:
+    """What this fade will actually do on the printer, where that differs.
+
+    The measurements behind these are in the module docstring. They are warnings
+    rather than corrections because the right fix depends on the picture: a
+    shallow fade may be exactly what someone wants.
+    """
+    notes: list[str] = []
+    if not fade.active:
+        return notes
+
+    if not fade.screened and not fade.stacked and fade.dissolve < 1.0:
+        # A tonal ramp is the one thing this printer cannot render.
+        low = min(fade.min_alpha, fade.max_alpha)
+        if low < ALPHA_CLIFF:
+            notes.append(
+                f"tonal fade runs down to {low:.0%} alpha, and the printer drops "
+                f"everything under about {ALPHA_CLIFF:.0%} — the fade will stop "
+                "dead partway instead of reaching the glass. Use a dot screen "
+                "(halftone_mm), dissolve, or ink layers to carry the tail."
+            )
+
+    if fade.screened and fade.halftone_mm < MIN_HALFTONE_MM:
+        notes.append(
+            f"dot pitch {fade.halftone_mm:.2f}mm is finer than the {MIN_HALFTONE_MM}mm "
+            "that printed cleanly; the dots bridge into blotches below that."
+        )
+
+    if fade.stacked and fade.layers > 4:
+        notes.append(
+            f"{fade.layers} layers means {fade.layers} passes fed by hand, and ink "
+            "stops deepening well before that — three is usually the most that earns "
+            "its keep."
+        )
+    return notes
 
 
 @dataclass
