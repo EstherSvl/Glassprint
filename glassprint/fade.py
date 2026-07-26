@@ -49,17 +49,21 @@ MODES = ("none", "linear", "radial", "shape")
 #: one died at half its length.
 #:
 #: Read this as a working limit, not a mechanism. The same file printed on white
-#: card ramped smoothly to 5% alpha, so this is not a threshold in the RIP. Two
-#: things differed and only one has been ruled out:
+#: card ramped smoothly to 5% alpha, so it is not a threshold in the RIP. Three
+#: candidates, in the order they now look likely:
 #:
+#: * **The white underbase was switched on for the glass run and off for the
+#:   card.** Studio builds that underbase from the alpha channel, so if the
+#:   generation thresholds, the tail of a fade loses its white and thin ink over
+#:   bare green glass stops being visible. That would make the cliff a property
+#:   of the white pass — and mean it does not exist with white off at all.
 #: * The test ink was RGB(20,20,24), which this printer renders as a thin cool
-#:   blue-grey — quite unlike RGB(0,0,0), which comes out dense. Thin grey at 30%
-#:   alpha on deep green glass may simply be invisible rather than unprinted.
-#: * The substrate. Ink on white card is read in reflection; on transparent
-#:   glass most of the contrast has to come from transmission.
+#:   blue-grey, quite unlike RGB(0,0,0). Thin grey at 30% alpha on deep green
+#:   glass may be invisible rather than unprinted.
+#: * The substrate: card is read in reflection, glass mostly in transmission.
 #:
-#: A retest with pure black on the same glass will separate them. Until it does,
-#: warn rather than correct.
+#: One print settles it — pure black, white off, on the same green glass. Until
+#: then, warn rather than correct.
 ALPHA_CLIFF = 0.5
 
 #: Pure black and near-black are not the same colour to this printer: RGB(0,0,0)

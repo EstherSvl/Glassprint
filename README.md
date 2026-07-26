@@ -422,12 +422,19 @@ after its 45% patch, a continuous one at half its length — and then the same f
 on white card ramped smoothly to 5%. So it is **not** a threshold in the RIP, and
 the first version of this section, which said it was, was wrong.
 
-The likeliest cause is the ink. Those tiles were drawn in RGB(20,20,24), which
-this printer renders as a thin blue-grey; RGB(0,0,0) comes out dense and warm.
-There is a discontinuity at the black point, and a thin grey at 30% alpha on
-deep green glass may be invisible rather than absent. **Ask for exactly zero
-when you want density.** A retest with pure black on the same glass is
-outstanding.
+Three things could account for it, and the likeliest is the one neither of the
+first two guesses considered: **the glass run had the white underbase switched
+on and the card run did not.** Studio builds that underbase from the alpha
+channel, so if the generation thresholds, the tail of a fade loses its white and
+thin ink over bare green glass stops being visible — making the cliff a property
+of the white pass rather than of alpha, and absent entirely with white off.
+
+The other two remain possible. The tiles were drawn in RGB(20,20,24), which this
+printer renders as a thin blue-grey where RGB(0,0,0) comes out dense and warm —
+so **ask for exactly zero when you want density**, regardless. And card is read
+in reflection where glass is read mostly in transmission.
+
+One print settles it: pure black, white off, same glass.
 
 What is not in doubt: **coverage works.** Dissolve, dot screens and ink layers
 all vary *how much* full-strength ink there is, and all three ran to 12% on both
