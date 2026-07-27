@@ -415,8 +415,18 @@ function showProfile(report) {
     ["ink bleed", `${Math.round(report.muddiness * 100)}% outside its own channel`],
     ["accuracy", `${report.error_levels} levels — was ${report.uncalibrated_error_levels}`],
   ];
+  // The repeated patch is the measurement measuring itself. Textured glass,
+  // a shaky hand or a patchy lamp all show up here first, and every other
+  // number is only meaningful against it — so it gets a verdict, not just a
+  // figure.
   if (report.noise_levels != null) {
-    rows.push(["repeatability", `${report.noise_levels} levels between two prints of one colour`]);
+    const noise = report.noise_levels;
+    const verdict =
+      noise < 3 ? "clean" : noise < 8 ? "usable, but the fine distinctions are soft" : "too noisy to trust";
+    rows.push([
+      "repeatability",
+      `${noise} levels between two prints of one colour — <b>${verdict}</b>`,
+    ]);
   }
   // The two-column grid lives on .profile itself, so the terms and values go
   // straight in rather than inside a <dl> that would break the grid.
@@ -425,7 +435,13 @@ function showProfile(report) {
   $("colour-tool").hidden = false;
   $("forget-profile").hidden = false;
 
-  if (better > 3) {
+  if (report.noise_levels != null && report.noise_levels >= 8) {
+    setStatus(
+      "the same colour printed twice came out " +
+        `${report.noise_levels} levels apart — the surface or the light is louder than the ink`,
+      "error"
+    );
+  } else if (better > 3) {
     setStatus(`calibrated — ${better.toFixed(0)}x closer than the assumption it replaces`);
   } else {
     setStatus("calibrated, but barely better than uncalibrated — check the photo", "error");

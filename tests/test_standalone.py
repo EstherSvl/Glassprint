@@ -209,3 +209,17 @@ def test_the_hidden_attribute_actually_hides(built):
     assert re.search(r"\[hidden\][^{]*\{[^}]*display:\s*none\s*!important", built), (
         "nothing in the stylesheet makes the hidden attribute stick"
     )
+
+
+def test_the_readout_judges_its_own_noise():
+    """A profile off a textured or badly lit plate must say so.
+
+    The repeated patch is the one number that measures the measurement. Left as
+    a bare figure it reads like any other statistic; a reader with no baseline
+    cannot tell 0.4 from 9. So the built page has to carry the thresholds.
+    """
+    source = (ROOT / "glassprint" / "web" / "app.js").read_text()
+    assert "noise_levels" in source
+    for verdict in ("clean", "usable", "too noisy to trust"):
+        assert verdict in source, verdict
+    assert "louder than the ink" in source, "a noisy read must fail loudly, not pass quietly"
