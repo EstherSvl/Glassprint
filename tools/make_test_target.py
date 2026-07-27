@@ -53,6 +53,9 @@ SHAPES: dict[str, tuple[float, float, tuple[str, ...]]] = {
     "band": (140.0, 46.0, ("steps", "screen", "fade")),
 }
 
+#: Tone steps for a tile too narrow to carry the full twelve.
+TONES_NARROW = [100, 80, 60, 45, 30, 20, 10, 5]
+
 #: Coverage steps. The interesting region is the bottom, so the top end thins
 #: out first when there is less width to spend.
 STEPS_WIDE = [100, 90, 80, 70, 60, 50, 40, 30, 25, 20, 15, 12, 10, 8, 6, 4, 2]
@@ -367,81 +370,98 @@ def white_test(width_mm: float = 140.0, height_mm: float = 46.0) -> Raster:
     The layer count is a printer setting, not something a file can carry, so
     this gets printed once per setting with the number written in the blank.
     """
+    # A short tile has to give up something. It gives up the captions and some
+    # of the steps, never a row: the three rows are the whole comparison, and
+    # two of them on their own answer nothing.
+    tight = height_mm < 40.0
+    margin = 2.0 if tight else MARGIN_MM
+    tones = TONES_NARROW if width_mm < 110 else TONES
+    block_h = 4.2 if tight else 5.6
+    ramp_h = 4.8 if tight else 6.4
+
     canvas_w, canvas_h = mm(width_mm), mm(height_mm)
     canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
 
-    small, tiny = font(1.4), font(1.1)
-    left = mm(MARGIN_MM)
+    small, tiny = font(1.1 if tight else 1.4), font(0.9 if tight else 1.1)
+    left = mm(margin)
     width = canvas_w - 2 * left
-    y = MARGIN_MM
+    y = margin
 
     def label(text: str, x: int, top_mm: float, chosen=None) -> None:
         draw.text((x, mm(top_mm)), text, font=chosen or small, fill=(*INK, 255))
 
-    label(
-        f"glassprint white base · {width_mm:.0f}x{height_mm:.0f}mm · layers of white: ______",
-        left + mm(3.5),
-        y,
-    )
-    y += 2.4
-    draw.rectangle([left, mm(y), left + mm(10), mm(y) + mm(0.7)], fill=(*INK, 255))
-    label("10mm · write the setting above before you put it down", left + mm(11), y - 0.3, tiny)
-    y += 2.2
+    if tight:
+        # Bar first, caption after it. Overlapped, the one thing on the plate
+        # that says which setting it was is the thing you cannot read.
+        draw.rectangle([left, mm(y + 0.4), left + mm(10), mm(y + 0.4) + mm(0.5)], fill=(*INK, 255))
+        label("10mm · white layers: ______", left + mm(11), y, tiny)
+        y += 2.2
+    else:
+        label(
+            f"glassprint white base · {width_mm:.0f}x{height_mm:.0f}mm · layers of white: ______",
+            left + mm(3.5),
+            y,
+        )
+        y += 2.4
+        draw.rectangle([left, mm(y), left + mm(10), mm(y) + mm(0.7)], fill=(*INK, 255))
+        label("10mm · write the setting above before you put it down", left + mm(11), y - 0.3, tiny)
+        y += 2.2
 
     # -- 1. how opaque is the base on its own? -------------------------------
     label("1  white alone — against a black card, does it cover?", left, y)
-    y += 2.0
+    y += 1.6 if tight else 2.0
     block = width // 4
     for index, alpha in enumerate([100, 60, 30, 10]):
         x = left + index * block
         draw.rectangle(
-            [x, mm(y), x + block - mm(1.2), mm(y + 5.6)],
+            [x, mm(y), x + block - mm(1.2), mm(y + block_h)],
             fill=(255, 255, 255, round(alpha * 2.55)),
         )
-        label(f"{alpha}", x + mm(0.3), y + 5.8, tiny)
-    y += 8.2
+        label(f"{alpha}", x + mm(0.3), y + block_h + 0.1, tiny)
+    y += block_h + (2.0 if tight else 2.6)
 
     # -- 2 and 3. the same tones, two mechanisms, aligned column by column ----
     #
     # Aligned on purpose. Whichever row still has a range on this substrate is
     # the one to build fades out of, and reading that off needs the two side by
     # side rather than on separate plates a week apart.
-    step = width // len(TONES)
-    label("2  tone by RGB value at full alpha — the one that collapsed on clear glass", left, y)
-    y += 2.0
-    for index, percent in enumerate(TONES):
+    step = width // len(tones)
+    label("2  tone by RGB value at full alpha — collapsed on clear glass", left, y)
+    y += 1.6 if tight else 2.0
+    for index, percent in enumerate(tones):
         # Inverted against the percentage, so this row runs dark to light like
         # the alpha row beneath it. Printed the other way round the two ramps
         # oppose each other and the columns compare a black against a white,
         # which is exactly what the alignment exists to avoid.
         value = round(255 * (100 - percent) / 100.0)
         x = left + index * step
-        draw.rectangle([x, mm(y), x + step - mm(0.5), mm(y + 6.4)], fill=(value, value, value, 255))
-        label(str(value), x + mm(0.2), y + 6.6, tiny)
-    y += 9.0
+        draw.rectangle([x, mm(y), x + step - mm(0.5), mm(y + ramp_h)], fill=(value, value, value, 255))
+        label(str(value), x + mm(0.2), y + ramp_h + 0.1, tiny)
+    y += ramp_h + (2.0 if tight else 2.6)
 
-    label("3  the same tones by alpha, pure black — compare straight up the column", left, y)
-    y += 2.0
-    for index, percent in enumerate(TONES):
+    label("3  the same tones by alpha — compare straight up the column", left, y)
+    y += 1.6 if tight else 2.0
+    for index, percent in enumerate(tones):
         x = left + index * step
         draw.rectangle(
-            [x, mm(y), x + step - mm(0.5), mm(y + 6.4)], fill=(*INK, round(percent * 2.55))
+            [x, mm(y), x + step - mm(0.5), mm(y + ramp_h)], fill=(*INK, round(percent * 2.55))
         )
-        label(str(percent), x + mm(0.2), y + 6.6, tiny)
-    y += 9.4
+        label(str(percent), x + mm(0.2), y + ramp_h + 0.1, tiny)
+    y += ramp_h + (1.6 if tight else 2.2)
 
     # Colour used to have a row here and no longer does. Three tonal rows do not
     # fit beside it in 46mm, and colour already has a better instrument: the
     # 84x41mm chart, which measures it properly rather than by eye and has an
     # "opaque" mode of its own. One tile per question.
 
-    if y > height_mm - MARGIN_MM:
+    if y > height_mm - margin:
         raise SystemExit(
             f"{width_mm:.0f}x{height_mm:.0f} overflows: needs {y:.1f}mm of {height_mm:.0f}mm"
         )
 
-    corner_marks(draw, canvas_w, canvas_h)
+    if not tight:
+        corner_marks(draw, canvas_w, canvas_h)
     return Raster(np.array(canvas, dtype=np.uint8), dpi=(DPI, DPI))
 
 
@@ -630,13 +650,21 @@ def main() -> int:
             f"{px_mm(tile.width):.0f}x{px_mm(tile.height):.0f}mm"
         )
 
-    tile = white_test()
-    out = OUT / "glassprint-white-base.png"
-    tile.save(out, fmt="png", dpi=(DPI, DPI))
-    print(
-        f"{out.name:38} {tile.width}x{tile.height}px  "
-        f"{px_mm(tile.width):.0f}x{px_mm(tile.height):.0f}mm  (print once per white setting)"
-    )
+    # One per shape of glass that exists. The band is the roomy version; the
+    # strips are cut from a 185x35mm offcut, in three so that no white, one
+    # layer and two can be compared side by side rather than a week apart.
+    for name, (w, h) in {
+        "white-base": (140.0, 46.0),
+        "white-base-strip": (56.0, 31.0),
+        "white-base-half": (88.0, 31.0),
+    }.items():
+        tile = white_test(w, h)
+        out = OUT / f"glassprint-{name}.png"
+        tile.save(out, fmt="png", dpi=(DPI, DPI))
+        print(
+            f"{out.name:38} {tile.width}x{tile.height}px  "
+            f"{px_mm(tile.width):.0f}x{px_mm(tile.height):.0f}mm  (once per white setting)"
+        )
 
     passes = glaze_test()
     for index, raster in enumerate(passes, start=1):
