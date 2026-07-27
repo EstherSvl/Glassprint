@@ -150,6 +150,43 @@ REPEAT = (HELD_OUT[0], HELD_OUT[7])
 BLACK = 0
 
 
+def _legacy_colours() -> list[RGB]:
+    """The order charts were printed in before the held-out patches were spread.
+
+    Kept because plates already exist. Reading one with the current order does
+    not produce a wrong answer — the repeated patch disagrees violently and the
+    read is refused — but "reprint it" is a poor thing to tell someone holding a
+    perfectly good plate, when the same checksum can just as easily say *which*
+    chart they are holding.
+    """
+    cube = [
+        (r, g, b)
+        for r in (0, 128, 255)
+        for g in (0, 128, 255)
+        for b in (0, 128, 255)
+        if (r, g, b) not in {(255, 255, 255), (0, 0, 0)}
+    ]
+    greys = [(v, v, v) for v in (32, 64, 96, 160, 192, 224)]
+    held_out = [
+        (200, 60, 40),
+        (40, 120, 200),
+        (120, 200, 60),
+        (220, 180, 40),
+        (90, 40, 140),
+        (40, 160, 150),
+        (180, 90, 140),
+    ]
+    return [(0, 0, 0), *cube, *greys, *held_out, held_out[0]]
+
+
+#: Every chart layout the reader can recognise, newest first, as
+#: ``(name, colours, held-out indices, repeated pair)``.
+LAYOUTS = (
+    ("current", colours, HELD_OUT, REPEAT),
+    ("pre-spread", _legacy_colours, tuple(range(32, 40)), (32, 39)),
+)
+
+
 def glass_cells(layout: "Layout") -> tuple[int, int, int, int]:
     """The four grid corners, which carry the substrate rather than a colour.
 
@@ -164,11 +201,11 @@ def glass_cells(layout: "Layout") -> tuple[int, int, int, int]:
     return (0, layout.columns - 1, last - layout.columns + 1, last)
 
 
-def patches(layout: "Layout | None" = None) -> list[RGB | None]:
+def patches(layout: "Layout | None" = None, order=None) -> list[RGB | None]:
     """Every cell in reading order. ``None`` means bare glass — print nothing."""
     layout = layout or CHART
     corners = set(glass_cells(layout))
-    queue = list(colours())
+    queue = list((order or colours)())
     cells: list[RGB | None] = []
     for index in range(layout.columns * layout.rows):
         cells.append(None if index in corners else queue.pop(0))
@@ -270,6 +307,17 @@ class Profile:
     #: Substrates whose measurement is a reflection rather than a transmission,
     #: and so are photographed front-lit.
     REFLECTIVE = ("opaque", "white")
+
+    #: Channels the substrate passes too little of to measure the ink in. Not a
+    #: fault: you cannot find out what ink does to blue light through glass that
+    #: passes no blue light. Their predictions come out near zero because the
+    #: glass is near zero, which is the right answer for the wrong-sounding
+    #: reason, and the profile says so rather than implying it measured them.
+    unmeasured: tuple[str, ...] = ()
+
+    #: Which patches were kept out of the fit. Carried on the profile because
+    #: older charts put them elsewhere, and the residuals have to know.
+    held_out: tuple[int, ...] = ()
     #: Everything measured, kept for reporting rather than for prediction.
     requested: np.ndarray = field(default_factory=lambda: np.zeros((0, 3)))
     measured: np.ndarray = field(default_factory=lambda: np.zeros((0, 3)))
@@ -326,6 +374,12 @@ class Profile:
 
     # -- how good is it ----------------------------------------------------
 
+    @property
+    def live(self) -> list[int]:
+        """Channel indices the substrate actually passes enough light to measure."""
+        dead = {name: index for index, name in enumerate(("red", "green", "blue"))}
+        return [i for i in range(3) if i not in {dead[n] for n in self.unmeasured}]
+
     def residuals(self) -> dict:
         """Fit error in levels out of 255, and what it is an improvement on.
 
@@ -337,11 +391,13 @@ class Profile:
         """
         if not len(self.requested):
             return {}
-        levels = lambda t: np.abs(t - self.measured).mean(axis=1) * 255.0  # noqa: E731
+        live = self.live
+        levels = lambda t: np.abs(t[:, live] - self.measured[:, live]).mean(axis=1) * 255.0  # noqa: E731
         error = levels(self.transmittance(self.requested))
         naive = levels(self.requested / 255.0)
-        fitted = [i for i in range(len(error)) if i not in HELD_OUT]
-        held = [i for i in HELD_OUT if i < len(error)]
+        kept = self.held_out or HELD_OUT
+        fitted = [i for i in range(len(error)) if i not in kept]
+        held = [i for i in kept if i < len(error)]
         return {
             "fitted": round(float(error[fitted].mean()), 1),
             "held_out": round(float(error[held].mean()), 1) if held else None,
@@ -374,6 +430,8 @@ class Profile:
             "crosstalk": [[round(float(v), 4) for v in row] for row in self.crosstalk],
             "glass": to_hex(self.glass),
             "substrate": self.substrate,
+            "unmeasured": list(self.unmeasured),
+            "held_out": list(self.held_out),
             "requested": self.requested.astype(int).tolist(),
             "measured": [[round(float(v), 5) for v in row] for row in self.measured],
             "residuals": self.residuals(),
@@ -393,6 +451,8 @@ class Profile:
             crosstalk=np.array(data["crosstalk"], dtype=np.float64),
             glass=glass,
             # "glass" was the old name for what is now "transparent".
+            unmeasured=tuple(data.get("unmeasured") or ()),
+            held_out=tuple(data.get("held_out") or ()),
             substrate={"glass": "transparent"}.get(
                 str(data.get("substrate") or ""), str(data.get("substrate") or "transparent")
             ),
@@ -421,6 +481,8 @@ def fit(
     *,
     note: str = "",
     substrate: str = "transparent",
+    unmeasured: tuple[str, ...] = (),
+    held_out: tuple[int, ...] = (),
 ) -> Profile:
     """Fit the twelve numbers to measured transmittances.
 
@@ -430,15 +492,23 @@ def fit(
     requested = np.asarray(requested, dtype=np.float64).reshape(-1, 3)
     measured = np.clip(np.asarray(measured, dtype=np.float64).reshape(-1, 3), _FLOOR, 1.0)
 
-    keep = [i for i in range(len(requested)) if i not in HELD_OUT]
+    dead = [("red", "green", "blue").index(name) for name in unmeasured]
+    live = [i for i in range(3) if i not in dead]
+
+    keep = [i for i in range(len(requested)) if i not in (held_out or HELD_OUT)]
     demand = np.clip(1.0 - requested[keep] / 255.0, 0.0, 1.0)
-    absorbance = -np.log10(measured[keep])
+    absorbance = -np.log10(measured[keep])[:, live]
 
     def solve(gamma: np.ndarray) -> tuple[np.ndarray, float]:
         curved = demand ** gamma
         matrix, *_ = np.linalg.lstsq(curved, absorbance, rcond=None)
         error = float(((curved @ matrix - absorbance) ** 2).mean())
-        return matrix.T, error
+        # A dead channel gets a row of zeros, so its transmittance comes out 1
+        # and the prediction is the substrate alone — which, for a substrate
+        # that passes none of it, is the truth.
+        full = np.zeros((3, 3))
+        full[live] = matrix.T
+        return full, error
 
     # Coordinate descent on three gammas. The surface is smooth and shallow, so
     # a scan beats a solver here and cannot wander somewhere unphysical.
@@ -459,6 +529,8 @@ def fit(
         crosstalk=crosstalk,
         glass=glass,
         substrate=substrate,
+        unmeasured=unmeasured,
+        held_out=tuple(held_out or HELD_OUT),
         requested=requested,
         measured=measured,
         note=note,
@@ -665,8 +737,22 @@ def read(
         samples, _ = sample_all(corners)
 
     bare = samples[list(corner_cells)]
-    if float(np.min(bare)) <= 0.0:
-        raise ReadError("the bare-glass corners came out black — the photograph is underexposed")
+
+    # A channel the substrate barely passes cannot be measured, and that is not
+    # a fault in the photograph. Deep green glass passes so little blue that a
+    # well-exposed backlit shot reads 0, 1, 7, 0 out of 255 in its four bare
+    # corners — there is no blue light arriving to find out what the ink does
+    # to it. The first version called that underexposure and refused, which
+    # sent a good photograph back to be taken again.
+    level = bare.mean(axis=0)
+    unmeasured = tuple(
+        name for name, value in zip(("red", "green", "blue"), level) if value < _DEAD_CHANNEL
+    )
+    if len(unmeasured) == 3:
+        raise ReadError(
+            "every channel came back black — this really is underexposed, or the plate is "
+            "not lit from behind at all"
+        )
 
     # The illumination where each patch sits, interpolated bilinearly from the
     # four bare corners. This is what makes the reading immune to a lamp that
@@ -678,19 +764,36 @@ def read(
     )
     reference = weights @ bare
 
-    _refuse_if_veiled(samples, reference, bare, cells, black_cell)
+    _refuse_if_veiled(samples, reference, bare, cells, black_cell, unmeasured)
 
     keep = [i for i in range(len(cells)) if i not in set(corner_cells)]
     ink = np.clip(samples[keep] / reference[keep], _FLOOR, 1.0)
-    requested = np.array([cells[i] for i in keep], dtype=np.float64)
+    live = [i for i in range(3) if ("red", "green", "blue")[i] not in unmeasured]
 
-    # The chart prints one colour twice. The two must agree, and how far they
-    # do not is the noise floor of the whole reading — no fit can be more
+    # The chart prints one colour twice. The two must agree, and how far they do
+    # not is the noise floor of the whole reading — no fit can be more
     # consistent than the numbers it is fitted to. Checked before fitting,
     # because a fit to noise still returns a tone curve and a density and looks
     # for all the world like a measurement.
-    original, repeat = REPEAT
-    apart = float(np.abs(ink[original] - ink[repeat]).mean() * 255.0)
+    #
+    # It doubles as the way to tell which chart is on the plate. Charts printed
+    # before the held-out patches were spread carry the colours in a different
+    # order, and read against the wrong one those two patches are not the same
+    # colour at all — so they disagree enormously, and the layout whose repeat
+    # agrees is the layout that was printed.
+    best = None
+    for name, order, kept, (original, repeat) in LAYOUTS:
+        table = patches(layout, order)
+        apart = float(np.abs(ink[original][live] - ink[repeat][live]).mean() * 255.0)
+        if best is None or apart < best[0]:
+            best = (apart, name, table, kept)
+
+    apart, layout_name, cells, kept = best
+    requested = np.array([cells[i] for i in keep], dtype=np.float64)
+    if layout_name != LAYOUTS[0][0]:
+        note_layout = f"; read as the {layout_name} chart layout"
+    else:
+        note_layout = ""
     if apart > _MAX_REPEAT:
         raise ReadError(
             f"the same colour printed twice on this plate reads {apart:.0f} levels apart, so "
@@ -701,7 +804,7 @@ def read(
             "colours are in a different order; reprint it from the current file."
         )
 
-    ratio = float(bare.max(axis=0).max() / max(bare.min(axis=0).min(), 1e-6))
+    ratio = float(bare[:, live].max() / max(bare[:, live].min(), 1e-6))
 
     measured_glass = glass
     if measured_glass is None:
@@ -709,15 +812,30 @@ def read(
             rgb, luma, corners.mean(axis=0), bare.mean(axis=0)
         )
 
-    note = "measured"
+    note = "measured" + note_layout
     if ratio > _MAX_CORNER_RATIO:
-        note = f"measured, but the light fell off {ratio:.1f}x across the plate — worth reshooting"
+        note = f"measured{note_layout}, but the light fell off {ratio:.1f}x across the plate"
     if measured_glass is None:
         measured_glass = (255, 255, 255)
         note = "measured, but the glass colour could not be read — include some background around the plate"
 
-    return fit(requested, ink, measured_glass, note=note, substrate=substrate)
+    if unmeasured:
+        which = " and ".join(unmeasured)
+        note = f"{note}; {which} unmeasurable — the substrate passes almost none of it"
+    return fit(
+        requested,
+        ink,
+        measured_glass,
+        note=note,
+        substrate=substrate,
+        unmeasured=unmeasured,
+        held_out=kept,
+    )
 
+
+#: Below this share of the illumination, a channel carries no usable signal —
+#: it is the substrate blocking it, not the camera missing it.
+_DEAD_CHANNEL = 0.01
 
 #: How much light the solid-black cell may still pass before the photograph is
 #: judged to be measuring a reflection rather than the print. One pass of black
@@ -747,6 +865,7 @@ def _refuse_if_veiled(
     bare: np.ndarray,
     cells: list,
     black_cell: int,
+    unmeasured: tuple[str, ...] = (),
 ) -> None:
     """Reject a photograph that is measuring light off the surface, not through it.
 
@@ -769,7 +888,8 @@ def _refuse_if_veiled(
     written for, the two top corners carried four times the blue of the two
     bottom ones: a window reflected in the upper half of the plate.
     """
-    black = samples[black_cell] / np.maximum(reference[black_cell], 1e-6)
+    live = [i for i in range(3) if ("red", "green", "blue")[i] not in unmeasured]
+    black = (samples[black_cell] / np.maximum(reference[black_cell], 1e-6))[live]
     if float(np.mean(black)) > _MAX_BLACK:
         raise ReadError(
             f"solid black came back at {float(np.mean(black)):.0%} of bare substrate, so most "
@@ -778,7 +898,7 @@ def _refuse_if_veiled(
             "opaque substrate, off to one side), and keep windows and lamps out of the reflection."
         )
 
-    chroma = bare / np.maximum(bare.sum(axis=1, keepdims=True), 1e-6)
+    chroma = bare[:, live] / np.maximum(bare[:, live].sum(axis=1, keepdims=True), 1e-6)
     spread = float(np.ptp(chroma, axis=0).max())
     if spread > _MAX_CORNER_CHROMA:
         raise ReadError(

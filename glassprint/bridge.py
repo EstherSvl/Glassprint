@@ -341,12 +341,15 @@ class Bridge:
             ]
         else:
             lighting = [
-                "Hold it up against the light — a bright window or a white screen — "
-                "so the light comes through the glass rather than off it.",
-                "Do NOT lay it on a lit sheet of paper: that sends the light through "
-                "twice and reads every colour as twice its real density.",
-                "Keep some of the light source visible all round the plate: it is the "
-                "white reference.",
+                "Best by far: show a plain white screen on a tablet or laptop at full "
+                "brightness, lay the plate flat on it, and shoot straight down.",
+                "A screen is bright, perfectly even and diffuse — which a window is not. "
+                "Sky through a window falls off across the plate and leaves a bright spot "
+                "the four corners cannot correct, and that is what spoils most readings.",
+                "Turn the room lights off so nothing reflects in the front face.",
+                "Leave a little screen showing all round the plate: it is the white reference.",
+                "Failing a screen, hold it up to an overcast sky — never lay it on lit paper, "
+                "which sends the light through twice and doubles every density.",
             ]
         return {
             "file": f"glassprint-colour-chart-{substrate}.png",

@@ -264,15 +264,17 @@ def test_the_lighting_advice_follows_how_light_reaches_the_eye():
     base — in, reflect, back out: twice. Swap the two and every colour reads as
     its own square or square root, and the fit absorbs it without complaining.
     """
-    clear = _call("chart", {"substrate": "transparent"})["ok"]["instructions"]
-    assert any("Hold it up against the light" in line for line in clear)
-    assert any("twice" in line for line in clear), "name the trap, do not merely avoid it"
-    assert not any("front" in line for line in clear)
+    # Checked as properties rather than phrases: the wording is allowed to
+    # improve, the advice is not allowed to invert.
+    clear = " ".join(_call("chart", {"substrate": "transparent"})["ok"]["instructions"]).lower()
+    assert "screen" in clear or "behind" in clear or "hold it up" in clear
+    assert "twice" in clear, "name the double-pass trap, do not merely avoid it"
+    assert "lit from the front" not in clear
 
     for reflective in ("opaque", "white"):
-        lines = _call("chart", {"substrate": reflective})["ok"]["instructions"]
-        assert any("front" in line for line in lines), reflective
-        assert not any("Hold it up" in line for line in lines), reflective
+        lines = " ".join(_call("chart", {"substrate": reflective})["ok"]["instructions"]).lower()
+        assert "front" in lines, reflective
+        assert "hold it up" not in lines, reflective
 
 
 def test_the_substrate_is_recorded_and_bad_ones_are_refused():
