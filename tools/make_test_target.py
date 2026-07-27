@@ -339,29 +339,33 @@ WHITE_TEST_INKS = [
 
 
 def white_test(width_mm: float = 140.0, height_mm: float = 46.0) -> Raster:
-    """How much white to put underneath — and what the in-between looks like.
+    """How much white to put underneath, and whether any tone survives without it.
 
-    All the glaze work so far has been at one end of a dial: no white at all,
-    where the glass supplies the colour and the piece is genuinely transparent.
-    The other end is five layers of white, where the glass has stopped
-    mattering and the machine is printing on something that behaves like card.
-    The first plate printed here was at that end, and the tests since have all
-    been at the other.
+    The first version of this tile asked how opaque the base is and whether
+    alpha thins it. It answered both — the base is opaque from one layer, and
+    alpha does not thin it — and in doing so missed the question that turned out
+    to matter.
 
-    Nobody has looked at the middle, and the middle is the part a UV printer on
-    glass can do that neither paper nor a lightbox can: a base thin enough to
-    still pass light, so the piece reads one way lit from behind and another way
-    lit from the front. That is a material effect, not a colour-accuracy one,
-    and it will not show up in any measurement taken through a lightbox alone.
+    That one only surfaced when a chart was finally read properly: on clear
+    green glass with no white base, every grey from 224 down to 32 transmitted
+    between 82% and 100%, and only pure black dropped, to 8%. Nearly the whole
+    tonal range collapses into nothing, and the reason is spectral — tinted
+    glass passes a narrow band, and the ink's absorption inside that band is
+    slight. Only black, which absorbs everywhere, gets through to the eye.
 
-    The file cannot set the layer count — that is a printer setting — so this
-    tile is meant to be printed several times, once per setting, and the title
-    has a blank to write it in. What the file *can* vary is alpha, which is what
-    drives the underbase, so that gets a row of its own: if alpha thins the white
-    as well as the colour, the dial is in the artwork and not only in the RIP.
+    So the row that decides everything is a **grey ramp by RGB value**, and it
+    is set directly beneath the same ramp by alpha, sharing a column each. One
+    glance down a column says which of the two mechanisms is carrying tone on
+    this substrate — and on which substrates either of them does.
 
-    Read every plate twice: once against a black card, which shows how opaque
-    the base is, and once backlit, which shows how much light still gets past.
+    Opaque glass is the case worth running it on. Light crosses the ink, hits
+    the glass and comes back, so the ink acts twice; and it is a diffuse
+    reflector rather than a filter, so there is a ground to work against. Both
+    argue for more range than clear glass gave. Whether that is enough to print
+    tone on without any white at all is exactly what the tile is for.
+
+    The layer count is a printer setting, not something a file can carry, so
+    this gets printed once per setting with the number written in the blank.
     """
     canvas_w, canvas_h = mm(width_mm), mm(height_mm)
     canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
@@ -375,50 +379,62 @@ def white_test(width_mm: float = 140.0, height_mm: float = 46.0) -> Raster:
     def label(text: str, x: int, top_mm: float, chosen=None) -> None:
         draw.text((x, mm(top_mm)), text, font=chosen or small, fill=(*INK, 255))
 
-    label(f"glassprint white base · {width_mm:.0f}x{height_mm:.0f}mm · layers of white: ______", left + mm(3.5), y)
+    label(
+        f"glassprint white base · {width_mm:.0f}x{height_mm:.0f}mm · layers of white: ______",
+        left + mm(3.5),
+        y,
+    )
     y += 2.4
     draw.rectangle([left, mm(y), left + mm(10), mm(y) + mm(0.7)], fill=(*INK, 255))
     label("10mm · write the setting above before you put it down", left + mm(11), y - 0.3, tiny)
-    y += 2.6
+    y += 2.2
 
     # -- 1. how opaque is the base on its own? -------------------------------
-    #
-    # White ink and nothing else. Against a black card this reads as white if
-    # the base is covering and grey if it is not, which is the whole question
-    # and needs no instrument to answer.
-    label("1  white alone — photograph against black card, then against light", left, y)
+    label("1  white alone — against a black card, does it cover?", left, y)
     y += 2.0
-    block_w = width // 6
-    for index, alpha in enumerate([100, 80, 60, 40, 25, 10]):
-        x = left + index * block_w
+    block = width // 4
+    for index, alpha in enumerate([100, 60, 30, 10]):
+        x = left + index * block
         draw.rectangle(
-            [x, mm(y), x + block_w - mm(1.2), mm(y + 6.2)],
+            [x, mm(y), x + block - mm(1.2), mm(y + 5.6)],
             fill=(255, 255, 255, round(alpha * 2.55)),
         )
-        label(f"{alpha}", x + mm(0.3), y + 6.4, tiny)
-    y += 9.4
+        label(f"{alpha}", x + mm(0.3), y + 5.8, tiny)
+    y += 8.2
 
-    # -- 2. colour over the base ---------------------------------------------
-    label("2  colour at 100% over the base — compare with the same swatches on bare glass", left, y)
+    # -- 2 and 3. the same tones, two mechanisms, aligned column by column ----
+    #
+    # Aligned on purpose. Whichever row still has a range on this substrate is
+    # the one to build fades out of, and reading that off needs the two side by
+    # side rather than on separate plates a week apart.
+    step = width // len(TONES)
+    label("2  tone by RGB value at full alpha — the one that collapsed on clear glass", left, y)
     y += 2.0
-    swatch = width // len(WHITE_TEST_INKS)
-    for index, (name, rgb) in enumerate(WHITE_TEST_INKS):
-        x = left + index * swatch
-        draw.rectangle([x, mm(y), x + swatch - mm(0.8), mm(y + 6.0)], fill=(*rgb, 255))
-        label(name, x + mm(0.3), y + 6.2, tiny)
+    for index, percent in enumerate(TONES):
+        # Inverted against the percentage, so this row runs dark to light like
+        # the alpha row beneath it. Printed the other way round the two ramps
+        # oppose each other and the columns compare a black against a white,
+        # which is exactly what the alignment exists to avoid.
+        value = round(255 * (100 - percent) / 100.0)
+        x = left + index * step
+        draw.rectangle([x, mm(y), x + step - mm(0.5), mm(y + 6.4)], fill=(value, value, value, 255))
+        label(str(value), x + mm(0.2), y + 6.6, tiny)
     y += 9.0
 
-    # -- 3. does alpha thin the base too? ------------------------------------
-    label("3  black at falling alpha — does the white thin with it, or stop at once?", left, y)
+    label("3  the same tones by alpha, pure black — compare straight up the column", left, y)
     y += 2.0
-    step = width // len(TONES)
     for index, percent in enumerate(TONES):
         x = left + index * step
         draw.rectangle(
-            [x, mm(y), x + step - mm(0.5), mm(y + 5.6)], fill=(*INK, round(percent * 2.55))
+            [x, mm(y), x + step - mm(0.5), mm(y + 6.4)], fill=(*INK, round(percent * 2.55))
         )
-        label(str(percent), x + mm(0.2), y + 5.8, tiny)
-    y += 8.0
+        label(str(percent), x + mm(0.2), y + 6.6, tiny)
+    y += 9.4
+
+    # Colour used to have a row here and no longer does. Three tonal rows do not
+    # fit beside it in 46mm, and colour already has a better instrument: the
+    # 84x41mm chart, which measures it properly rather than by eye and has an
+    # "opaque" mode of its own. One tile per question.
 
     if y > height_mm - MARGIN_MM:
         raise SystemExit(
