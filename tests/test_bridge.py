@@ -245,24 +245,53 @@ def test_a_photograph_with_no_chart_in_it_says_what_to_do():
     assert "error" in error and "chart" in error["error"]
 
 
-def test_the_white_base_chart_is_a_different_file_and_different_advice():
-    plain = _call("chart", {})["ok"]
-    based = _call("chart", {"white_base": True})["ok"]
-    assert plain["file"] != based["file"]
-    assert plain["data"] != based["data"]
-    assert based["white_base"] is True
-    # The lighting has to match the substrate, and getting it wrong is not a
-    # small error: a transparency laid on lit paper is a double pass, which
-    # reads every transmittance as its own square.
-    assert any("front" in line for line in based["instructions"])
-    assert not any("front" in line for line in plain["instructions"])
-    assert any("Hold it up against the light" in line for line in plain["instructions"])
-    assert any("twice" in line for line in plain["instructions"]), (
-        "the double-pass trap has to be named, not merely avoided by implication"
-    )
+def test_each_substrate_comes_back_as_its_own_file():
+    files = {
+        s: _call("chart", {"substrate": s})["ok"]["file"]
+        for s in ("transparent", "opaque", "white")
+    }
+    assert len(set(files.values())) == 3, files
+    # Three plates that look alike in a drawer a week later, so each names
+    # itself — in the filename and, more usefully, printed on the plate.
+    for substrate, name in files.items():
+        assert substrate in name
 
 
-def test_a_white_base_profile_is_recorded_as_one():
-    report = _call("calibrate", {"data": _photo_b64(), "white_base": True})["ok"]["report"]
-    assert report["substrate"] == "white"
-    assert _call("calibrate", {"data": _photo_b64()})["ok"]["report"]["substrate"] == "glass"
+def test_the_lighting_advice_follows_how_light_reaches_the_eye():
+    """Not "glass or white base" — how many times the light crosses the ink.
+
+    Through clear glass, once. Off an opaque ground — dark glass or a white
+    base — in, reflect, back out: twice. Swap the two and every colour reads as
+    its own square or square root, and the fit absorbs it without complaining.
+    """
+    clear = _call("chart", {"substrate": "transparent"})["ok"]["instructions"]
+    assert any("Hold it up against the light" in line for line in clear)
+    assert any("twice" in line for line in clear), "name the trap, do not merely avoid it"
+    assert not any("front" in line for line in clear)
+
+    for reflective in ("opaque", "white"):
+        lines = _call("chart", {"substrate": reflective})["ok"]["instructions"]
+        assert any("front" in line for line in lines), reflective
+        assert not any("Hold it up" in line for line in lines), reflective
+
+
+def test_the_substrate_is_recorded_and_bad_ones_are_refused():
+    for substrate in ("transparent", "opaque", "white"):
+        report = _call("calibrate", {"data": _photo_b64(), "substrate": substrate})["ok"]["report"]
+        assert report["substrate"] == substrate
+    # A typo must not quietly become the default: the three want different
+    # photographs, so guessing wrong yields a confident profile, not an error.
+    assert "error" in _call("chart", {"substrate": "white-base"})
+
+
+def test_opaque_glass_still_takes_its_colour_from_the_glass():
+    """A white base hides the glass; opaque glass *is* the glass."""
+    _call("calibrate", {"data": _photo_b64(), "substrate": "opaque"})
+    on_green = _call("colour", {"wanted": "#1e6b4a", "glass": "#2ea76f"})["ok"]
+    on_amber = _call("colour", {"wanted": "#1e6b4a", "glass": "#c4852c"})["ok"]
+    assert on_green["ask_for"] != on_amber["ask_for"]
+
+    _call("calibrate", {"data": _photo_b64(), "substrate": "white"})
+    white_green = _call("colour", {"wanted": "#1e6b4a", "glass": "#2ea76f"})["ok"]
+    white_amber = _call("colour", {"wanted": "#1e6b4a", "glass": "#c4852c"})["ok"]
+    assert white_green["ask_for"] == white_amber["ask_for"]

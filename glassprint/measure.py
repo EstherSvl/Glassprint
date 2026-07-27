@@ -229,11 +229,25 @@ class Profile:
     gamma: np.ndarray                      # (3,) per-channel tone curve
     crosstalk: np.ndarray                  # (3, 3) absorbance mixing
     glass: RGB                             # the substrate it was measured on
-    #: ``"glass"`` for ink straight onto tinted glass, ``"white"`` for ink over
-    #: a white underbase. The maths is identical — a ratio against whatever the
-    #: four corner cells printed — but what the answer *means* is not, and a
-    #: white base makes the glass colour irrelevant rather than merely different.
-    substrate: str = "glass"
+    #: What the ink was measured on. Three cases, and the distinction that
+    #: actually matters is not "glass or white" but **how light reaches your
+    #: eye**, because that decides how many times it crosses the ink:
+    #:
+    #: * ``"transparent"`` — clear tinted glass, no white base. Light passes
+    #:   through once. Measured backlit.
+    #: * ``"opaque"`` — opaque or dark glass, no white base. Light goes in
+    #:   through the ink, reflects off the glass and comes back out through it:
+    #:   two crossings. Measured front-lit. The fit absorbs the doubling, so the
+    #:   arithmetic is the same as ``"transparent"`` — only the lighting differs,
+    #:   and getting *that* wrong is silent.
+    #: * ``"white"`` — a white underbase, on any glass. Also two crossings, also
+    #:   front-lit, but the base has hidden the glass, so the glass colour stops
+    #:   being an input at all.
+    substrate: str = "transparent"
+
+    #: Substrates whose measurement is a reflection rather than a transmission,
+    #: and so are photographed front-lit.
+    REFLECTIVE = ("opaque", "white")
     #: Everything measured, kept for reporting rather than for prediction.
     requested: np.ndarray = field(default_factory=lambda: np.zeros((0, 3)))
     measured: np.ndarray = field(default_factory=lambda: np.zeros((0, 3)))
@@ -252,9 +266,14 @@ class Profile:
         return np.clip(10.0 ** (-absorbance), _FLOOR, 1.0)
 
     def _base(self, glass: RGB | None) -> np.ndarray:
-        """What the ink is sitting on. A white underbase hides the glass, so
-        passing a glass colour to a white-base profile is quietly ignored rather
-        than obeyed — obeying it would tint a prediction the base has covered."""
+        """What the ink is sitting on.
+
+        A white underbase hides the glass, so a glass colour handed to a
+        white-base profile is ignored rather than obeyed — obeying it would tint
+        a prediction the base has covered. Opaque glass is the opposite: the
+        glass *is* the ground, so its colour matters as much as it does for a
+        transparency, even though the light never gets through it.
+        """
         if self.substrate == "white":
             return np.array(self.glass, dtype=np.float64) / 255.0
         return np.array(glass or self.glass, dtype=np.float64) / 255.0
@@ -351,7 +370,10 @@ class Profile:
             gamma=np.array(data["gamma"], dtype=np.float64),
             crosstalk=np.array(data["crosstalk"], dtype=np.float64),
             glass=glass,
-            substrate=str(data.get("substrate") or "glass"),
+            # "glass" was the old name for what is now "transparent".
+            substrate={"glass": "transparent"}.get(
+                str(data.get("substrate") or ""), str(data.get("substrate") or "transparent")
+            ),
             requested=np.array(data.get("requested", []), dtype=np.float64).reshape(-1, 3),
             measured=np.array(data.get("measured", []), dtype=np.float64).reshape(-1, 3),
             note=data.get("note", ""),
@@ -376,7 +398,7 @@ def fit(
     glass: RGB,
     *,
     note: str = "",
-    substrate: str = "glass",
+    substrate: str = "transparent",
 ) -> Profile:
     """Fit the twelve numbers to measured transmittances.
 
@@ -575,7 +597,7 @@ def read(
     *,
     glass: RGB | None = None,
     layout: Layout = CHART,
-    substrate: str = "glass",
+    substrate: str = "transparent",
 ) -> Profile:
     """Measure a printed chart from a photograph of it.
 
@@ -712,7 +734,7 @@ def chart(
     *,
     dpi: float = 600.0,
     label: str = "",
-    white_base: bool = False,
+    substrate: str = "transparent",
 ):
     """Draw the chart to print. One pass, no registration to get wrong.
 
@@ -721,13 +743,17 @@ def chart(
     prediction is built out of, and asking for four passes would put the
     plate's registration between the question and the answer.
 
-    ``white_base`` is not cosmetic. Everything is measured as a ratio against
-    the four corner cells, so those cells have to *be* the substrate. Printed
-    with a white underbase, a corner left as a hole is bare glass while every
-    patch beside it sits on white ink — and the ratio between them is then two
-    different substrates divided by each other, which is not a measurement of
-    anything. So with a white base the corners print solid white instead, and
-    the reference becomes the base as the printer actually lays it down.
+    ``substrate`` changes the corner cells, and that is not cosmetic.
+    Everything is measured as a ratio against them, so those four cells have to
+    *be* whatever the ink is sitting on. Straight onto glass — clear or opaque —
+    that is the bare glass, so the corners are holes. Over a white underbase a
+    hole is bare glass while every patch beside it sits on white ink, and the
+    ratio is then two different substrates divided by each other, which measures
+    nothing; so there the corners print solid white instead.
+
+    Clear and opaque glass therefore produce an identical file. What differs
+    between them is the light you photograph it under, which the caller has to
+    get right — see :attr:`Profile.REFLECTIVE`.
     """
     from PIL import Image, ImageDraw
 
@@ -747,17 +773,20 @@ def chart(
         [origin, origin, origin + px(layout.frame_w_mm) - 1, origin + px(layout.frame_h_mm) - 1],
         fill=(0, 0, 0, 255),
     )
-    substrate = (255, 255, 255, 255) if white_base else (0, 0, 0, 0)
+    reference = (255, 255, 255, 255) if substrate == "white" else (0, 0, 0, 0)
     for index, colour in enumerate(patches(layout)):
         x, y, w, h = layout.cell(index)
         box = [origin + px(x), origin + px(y), origin + px(x + w) - 1, origin + px(y + h) - 1]
-        draw.rectangle(box, fill=(*colour, 255) if colour else substrate)
+        draw.rectangle(box, fill=(*colour, 255) if colour else reference)
 
     # The caption is the only part that can fail — in the browser build there
     # are no system fonts to load. A chart without its caption is still a
     # perfectly good chart, so it must not take the rest down with it.
-    base = "WITH white base" if white_base else "NO white base"
-    caption = label or f"glassprint colour chart · one pass · {base} · 100%"
+    described = {
+        "white": "WITH white base",
+        "opaque": "NO white base · opaque glass",
+    }.get(substrate, "NO white base · clear glass")
+    caption = label or f"glassprint colour chart · one pass · {described} · 100%"
     try:
         draw.text(
             (origin, origin + px(layout.frame_h_mm) + px(0.8)),

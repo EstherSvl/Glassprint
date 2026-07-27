@@ -632,29 +632,40 @@ repeatability  0.2 levels between two prints of one colour
 From the command line, `glassprint chart` and `glassprint calibrate photo.jpg`
 do the same two steps and write the profile as JSON.
 
-### With a white base, or without
+### Three substrates, and the one that is easy to get wrong
 
-Everything above is the *no white base* case, where the glass supplies half the
-colour. That is the hard case, and the interesting one — but it is not the only
-one, and it is not the reliable one.
+Pick what you are printing on — `--on transparent | opaque | white`, or the
+dropdown in card 9:
 
-Put enough white underneath and the glass stops mattering. The substrate is
-opaque, the printer behaves the way it does on card, and colour becomes
-predictable in the ordinary way. That is worth calibrating too, and the same
-chart does it — **tick the white-base box**, or `glassprint chart --white-base`.
+| | Corners | Photograph it | Glass colour |
+| --- | --- | --- | --- |
+| **transparent** | holes | held up to the light | an input |
+| **opaque** | holes | front-lit on white paper | an input |
+| **white** | solid white | front-lit on white paper | ignored |
 
-One thing has to change, and it is not cosmetic. Every reading is a ratio
-against the four corner cells, so those cells have to *be* the substrate. On
-bare glass they are holes. Over a white base a hole is bare glass while every
-patch beside it sits on white ink, and the ratio between them measures nothing
-at all — so with a white base the corners print solid white instead. The
-profile records which it was, and a white-base profile ignores any glass colour
-you hand it, because the base has covered the glass and tinting the prediction
-would answer a question about a substrate that is no longer there.
+Two things vary, and they do not vary together — which is why this is a choice
+of three rather than a checkbox.
 
-The lighting differs too: ink on bare glass is a transparency and reads backlit;
-ink on an opaque base is a print and reads front-lit. The instructions change
-with the box.
+**The corners** have to *be* whatever the ink sits on, because every reading is
+a ratio against them. Straight onto glass, clear or opaque, that is bare glass,
+so they are holes. Over a white underbase a hole is bare glass while every patch
+beside it sits on white ink, and the ratio is then two different substrates
+divided by each other — so there the corners print solid white instead.
+
+**The lighting** splits differently. The real question is not what the ink is
+on but **how many times the light crosses it**. Through clear glass, once. Off
+an opaque ground — dark glass *or* a white base — the light goes in, reflects
+and comes back: twice. So opaque glass is photographed like a print even though
+it takes its colour from the glass like a transparency.
+
+Get the lighting the wrong way round and every colour reads as its own square,
+or its own square root. **That failure has no symptom.** Doubling the absorbance
+is exactly a scale factor on the cross-talk matrix, so the fit absorbs it
+perfectly and hands back good residuals, a clean repeatability figure and
+predictions uniformly too dark. It is the only mistake here that produces a
+confident wrong answer, which is why the chart prints which substrate it is for
+on the plate itself, and why a substrate the tool does not recognise is an error
+rather than a default.
 
 ### How much white — the dial nobody has turned
 

@@ -404,19 +404,24 @@ def serve(
 def chart_command(
     out: Path = typer.Option(Path("glassprint-colour-chart.png"), "--out", "-o"),
     dpi: float = typer.Option(600.0, "--dpi"),
-    white_base: bool = typer.Option(False, "--white-base", help="Calibrate for ink over a white underbase."),
+    substrate: str = typer.Option(
+        "transparent", "--on", help="transparent | opaque | white — what the ink sits on."
+    ),
 ) -> None:
     """Write the colour chart to print, then photograph, then `calibrate`."""
-    from .measure import CHART, chart
+    from .measure import CHART, Profile, chart
 
-    chart(dpi=dpi, white_base=white_base).save(out, fmt="png", dpi=(dpi, dpi))
+    if substrate not in ("transparent", "opaque", "white"):
+        raise typer.BadParameter("--on must be transparent, opaque or white")
+
+    chart(dpi=dpi, substrate=substrate).save(out, fmt="png", dpi=(dpi, dpi))
     typer.secho(f"wrote {out}", fg=typer.colors.GREEN)
     typer.echo(f"  {CHART.width_mm:.0f} x {CHART.height_mm:.0f} mm, {CHART.columns * CHART.rows} cells")
-    typer.echo(f"  print at 100%, one pass, {'WITH' if white_base else 'no'} white base")
-    if white_base:
-        typer.echo("  photograph it front-lit on white paper — an opaque base has nothing to backlight")
+    typer.echo(f"  print at 100%, one pass, {'WITH' if substrate == 'white' else 'no'} white base")
+    if substrate in Profile.REFLECTIVE:
+        typer.echo("  photograph it FRONT-LIT on white paper — nothing to backlight through it")
     else:
-        typer.echo("  photograph it flat on a bright white background, some background showing all round")
+        typer.echo("  HOLD IT UP to a window — not laid on paper, which doubles every reading")
 
 
 @app.command("calibrate")
@@ -424,18 +429,23 @@ def calibrate_command(
     photo: Path = typer.Argument(..., exists=True, dir_okay=False, help="Photo of the printed chart."),
     out: Path = typer.Option(Path("glassprint-profile.json"), "--out", "-o"),
     glass: str = typer.Option("", "--glass", help="Override the glass colour rather than reading it."),
-    white_base: bool = typer.Option(False, "--white-base", help="The chart was printed over a white underbase."),
+    substrate: str = typer.Option(
+        "transparent", "--on", help="transparent | opaque | white — what it was printed on."
+    ),
 ) -> None:
     """Turn a photograph of the printed chart into a profile of your printer."""
     from .colors import parse_color
     from .measure import ReadError, read
+
+    if substrate not in ("transparent", "opaque", "white"):
+        raise typer.BadParameter("--on must be transparent, opaque or white")
 
     raster = Raster.from_bytes(photo.read_bytes(), name=photo.stem)
     try:
         profile = read(
             raster.rgba[:, :, :3],
             glass=parse_color(glass) if glass else None,
-            substrate="white" if white_base else "glass",
+            substrate=substrate,
         )
     except ReadError as exc:
         raise typer.BadParameter(str(exc))
@@ -443,7 +453,7 @@ def calibrate_command(
     out.write_text(profile.to_json())
     residuals = profile.residuals()
     typer.secho(f"wrote {out}", fg=typer.colors.GREEN)
-    typer.echo(f"  {'base ':<10} {to_hex(profile.glass)}" if white_base else f"  glass      {to_hex(profile.glass)}")
+    typer.echo(f"  {'ground':<10} {to_hex(profile.glass)}  ({substrate})")
     typer.echo(f"  tone curve {', '.join(f'{g:.2f}' for g in profile.gamma)}  (r, g, b)")
     typer.echo(f"  error      {residuals['held_out']} levels on patches it never saw")
     typer.echo(f"  was        {residuals['naive']} levels, uncalibrated")

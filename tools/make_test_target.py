@@ -603,9 +603,11 @@ def main() -> int:
     # reader has to look in exactly the places the printer put things.
     from glassprint.measure import CHART, chart as colour_chart
 
-    for white_base, name in [(False, "no-white"), (True, "with-white")]:
-        tile = colour_chart(dpi=DPI, white_base=white_base)
-        out = OUT / f"glassprint-colour-chart-{name}.png"
+    # "transparent" and "opaque" draw the same file — the difference between
+    # them is the light you photograph it under, not the artwork.
+    for substrate in ("transparent", "white"):
+        tile = colour_chart(dpi=DPI, substrate=substrate)
+        out = OUT / f"glassprint-colour-chart-{substrate}.png"
         tile.save(out, fmt="png", dpi=(DPI, DPI))
         print(
             f"{out.name:38} {tile.width}x{tile.height}px  "

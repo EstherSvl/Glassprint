@@ -25,6 +25,7 @@ from .colors import parse_color, to_hex
 from .compose import ComposeResult, ComposeSpec, GlazeSpec, compose
 from .export import ExportSpec, bundle, render
 from .fade import Fade
+from .measure import Profile
 from .pattern import Placement
 from .raster import READ_SUFFIXES, Raster
 from .recolor import ColorSpec
@@ -76,6 +77,23 @@ def describe(raster: Raster) -> dict[str, Any]:
         "name": raster.name,
         "thumb": data_url(preview_copy(raster, THUMB_MAX_SIDE)),
     }
+
+
+#: What the ink sits on, and therefore how the chart is drawn and lit.
+SUBSTRATES = ("transparent", "opaque", "white")
+
+
+def _substrate(payload: dict[str, Any]) -> str:
+    """Read the substrate, refusing anything not on the list.
+
+    Silently falling back to a default would be worse than an error: the three
+    differ in how the plate must be *photographed*, and a wrong choice there
+    produces a confident profile rather than a complaint.
+    """
+    value = str(payload.get("substrate") or "transparent")
+    if value not in SUBSTRATES:
+        raise BridgeError(f"substrate must be one of {', '.join(SUBSTRATES)} — got {value!r}")
+    return value
 
 
 def _float(value: Any, default: float) -> float:
@@ -302,22 +320,24 @@ class Bridge:
         from .measure import CHART, chart
 
         dpi = _float(payload.get("dpi"), 600.0)
-        white_base = bool(payload.get("white_base"))
-        raster = chart(dpi=dpi, label=str(payload.get("label") or ""), white_base=white_base)
+        substrate = _substrate(payload)
+        raster = chart(dpi=dpi, label=str(payload.get("label") or ""), substrate=substrate)
 
-        # The photograph has to be lit the way the piece will be seen, and the
-        # difference is not a matter of degree. Ink on bare glass is a
-        # transparency: light passes through once, and that single pass is what
-        # the model predicts. Lay the same plate on a lit sheet of paper instead
-        # and the light goes through, bounces, and comes back — two passes, so
-        # every transmittance reads as its own square. The fit absorbs that
-        # perfectly, into a density twice what it should be, and then predicts
-        # everything far too dark for a piece anyone actually holds up.
-        if white_base:
+        # The photograph has to be lit the way the finished piece will be seen,
+        # because that is what decides how many times the light crosses the ink.
+        # Through clear glass it crosses once. Off an opaque ground — dark glass
+        # or a white base — it goes in, reflects and comes back, so twice. Get it
+        # the wrong way round and every transmittance reads as its own square or
+        # its own square root; the fit absorbs that perfectly into a wrong
+        # density and reports good residuals either way. It is the one mistake
+        # here with no symptom.
+        if substrate in Profile.REFLECTIVE:
+            surface = "an opaque base" if substrate == "white" else "opaque glass"
             lighting = [
-                "Photograph it flat, lit from the front, on a sheet of white paper — "
-                "an opaque base has nothing to backlight.",
+                f"Photograph it flat, lit from the front, on a sheet of white paper — {surface} "
+                "has nothing to backlight.",
                 "Keep the paper in shot all round the plate: it is the white reference.",
+                "Light it from off to one side so the camera sees no reflection of itself.",
             ]
         else:
             lighting = [
@@ -329,14 +349,14 @@ class Bridge:
                 "white reference.",
             ]
         return {
-            "file": f"glassprint-colour-chart-{'with' if white_base else 'no'}-white.png",
+            "file": f"glassprint-colour-chart-{substrate}.png",
             "data": base64.b64encode(raster.encode(fmt="png", dpi=(dpi, dpi))).decode("ascii"),
             "size_mm": [round(CHART.width_mm, 1), round(CHART.height_mm, 1)],
             "patches": CHART.columns * CHART.rows,
-            "white_base": white_base,
+            "substrate": substrate,
             "instructions": [
                 "Print at 100%, one pass, "
-                + ("with the white base on" if white_base else "no white base")
+                + ("with the white base on" if substrate == "white" else "no white base")
                 + " — otherwise the same settings you print artwork with.",
                 f"Any glass at least {CHART.width_mm:.0f} x {CHART.height_mm:.0f}mm will do.",
                 *lighting,
@@ -359,7 +379,7 @@ class Bridge:
             raise BridgeError(f"Could not read that photograph ({exc}).")
 
         glass = parse_color(payload.get("glass")) if payload.get("glass") else None
-        substrate = "white" if payload.get("white_base") else "glass"
+        substrate = _substrate(payload)
         try:
             profile = read(photo.rgba[:, :, :3], glass=glass, substrate=substrate)
         except ReadError as exc:

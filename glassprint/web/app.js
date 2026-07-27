@@ -405,10 +405,10 @@ function showProfile(report) {
 
   const gamma = report.gamma.map((g) => g.toFixed(2)).join(" · ");
   const better = report.uncalibrated_error_levels / Math.max(report.error_levels, 0.1);
-  const onWhite = report.substrate === "white";
+  const ground = { white: "white base", opaque: "opaque glass" }[report.substrate] || "glass";
   const rows = [
     [
-      onWhite ? "white base" : "glass",
+      ground,
       `<span class="swatch" style="background:${report.glass}"></span>${report.glass}`,
     ],
     ["tone curve", `${gamma} <span class="hint">r · g · b</span>`],
@@ -453,7 +453,7 @@ async function getChart() {
   try {
     const data = await backend().call("chart", {
       session_id: state.sessionId,
-      white_base: $("chart-white-base").checked,
+      substrate: $("chart-substrate").value,
     });
     state.sessionId = data.session_id || state.sessionId;
 
@@ -481,7 +481,7 @@ async function readChart(file) {
       session_id: state.sessionId,
       data: window.GlassprintBackends.bytesToBase64(new Uint8Array(buffer)),
       glass: $("glass-on").checked ? $("glass-color").value : "",
-      white_base: $("chart-white-base").checked,
+      substrate: $("chart-substrate").value,
     });
     state.sessionId = data.session_id || state.sessionId;
     saveProfile(data.profile);

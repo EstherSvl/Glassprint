@@ -13,6 +13,7 @@ and a white balance that is not quite neutral.
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 
 import numpy as np
@@ -389,8 +390,6 @@ def test_a_greyscale_photograph_is_refused():
 
 
 def test_a_profile_survives_a_round_trip_through_json():
-    import json
-
     profile = measure.read(photograph())
     restored = measure.Profile.from_dict(json.loads(profile.to_json()))
     assert np.allclose(restored.gamma, profile.gamma, atol=1e-3)
@@ -409,7 +408,7 @@ def test_the_white_base_chart_prints_its_corners_instead_of_leaving_holes():
     of the ink; it is two different substrates cancelling badly.
     """
     layout = measure.CHART
-    raster = measure.chart(white_base=True)
+    raster = measure.chart(substrate="white")
     scale = raster.width / layout.width_mm
     for index in measure.glass_cells(layout):
         x, y, w, h = layout.cell(index)
@@ -420,7 +419,7 @@ def test_the_white_base_chart_prints_its_corners_instead_of_leaving_holes():
 
 def test_the_two_charts_differ_only_in_their_corners():
     plain = measure.chart().rgba.astype(int)
-    based = measure.chart(white_base=True).rgba.astype(int)
+    based = measure.chart(substrate="white").rgba.astype(int)
     differ = np.any(plain != based, axis=2)
     layout = measure.CHART
     scale = plain.shape[1] / layout.width_mm
@@ -430,6 +429,33 @@ def test_the_two_charts_differ_only_in_their_corners():
         column = int((layout.margin_mm + x + w / 2) * scale)
         expected = index in measure.glass_cells(layout)
         assert bool(differ[row, column]) is expected, index
+
+
+def test_clear_and_opaque_glass_measure_the_same_grid():
+    """Same patches, different caption.
+
+    The two want different photographs, and by the time a printed plate is in
+    your hand there is nothing else to tell them apart — so the caption says
+    which, and only the caption differs.
+    """
+    layout = measure.CHART
+    clear = measure.chart(substrate="transparent").rgba
+    opaque = measure.chart(substrate="opaque").rgba
+    scale = clear.shape[1] / layout.width_mm
+    grid = slice(0, int((layout.margin_mm + layout.frame_h_mm) * scale))
+    assert np.array_equal(clear[grid], opaque[grid]), "the artwork must be identical"
+    assert not np.array_equal(clear, opaque), "the caption must not be"
+
+    assert "opaque" in measure.Profile.REFLECTIVE
+    assert "transparent" not in measure.Profile.REFLECTIVE
+
+
+def test_an_old_profile_still_loads():
+    """"glass" was the earlier name for what is now "transparent"."""
+    profile = measure.read(photograph())
+    data = json.loads(profile.to_json())
+    data["substrate"] = "glass"
+    assert measure.Profile.from_dict(data).substrate == "transparent"
 
 
 def test_a_white_base_profile_ignores_the_glass_colour():
@@ -444,8 +470,6 @@ def test_a_white_base_profile_ignores_the_glass_colour():
 
 
 def test_the_substrate_survives_a_round_trip():
-    import json
-
     profile = measure.read(photograph(), substrate="white")
     restored = measure.Profile.from_dict(json.loads(profile.to_json()))
     assert restored.substrate == "white"
