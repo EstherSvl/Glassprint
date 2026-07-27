@@ -305,10 +305,14 @@ class Bridge:
         white_base = bool(payload.get("white_base"))
         raster = chart(dpi=dpi, label=str(payload.get("label") or ""), white_base=white_base)
 
-        # The photograph has to be lit the way the piece will be seen. Ink on
-        # bare glass is a transparency and reads backlit; ink on an opaque white
-        # base is a print and reads front-lit. Shooting either one the other
-        # way measures almost nothing.
+        # The photograph has to be lit the way the piece will be seen, and the
+        # difference is not a matter of degree. Ink on bare glass is a
+        # transparency: light passes through once, and that single pass is what
+        # the model predicts. Lay the same plate on a lit sheet of paper instead
+        # and the light goes through, bounces, and comes back — two passes, so
+        # every transmittance reads as its own square. The fit absorbs that
+        # perfectly, into a density twice what it should be, and then predicts
+        # everything far too dark for a piece anyone actually holds up.
         if white_base:
             lighting = [
                 "Photograph it flat, lit from the front, on a sheet of white paper — "
@@ -317,8 +321,12 @@ class Bridge:
             ]
         else:
             lighting = [
-                "Photograph it flat against a bright white background, with a little "
-                "of that background showing all round the plate.",
+                "Hold it up against the light — a bright window or a white screen — "
+                "so the light comes through the glass rather than off it.",
+                "Do NOT lay it on a lit sheet of paper: that sends the light through "
+                "twice and reads every colour as twice its real density.",
+                "Keep some of the light source visible all round the plate: it is the "
+                "white reference.",
             ]
         return {
             "file": f"glassprint-colour-chart-{'with' if white_base else 'no'}-white.png",

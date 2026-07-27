@@ -251,10 +251,15 @@ def test_the_white_base_chart_is_a_different_file_and_different_advice():
     assert plain["file"] != based["file"]
     assert plain["data"] != based["data"]
     assert based["white_base"] is True
-    # The lighting has to match the substrate: an opaque base has nothing to
-    # backlight, and shooting it that way measures nothing.
+    # The lighting has to match the substrate, and getting it wrong is not a
+    # small error: a transparency laid on lit paper is a double pass, which
+    # reads every transmittance as its own square.
     assert any("front" in line for line in based["instructions"])
     assert not any("front" in line for line in plain["instructions"])
+    assert any("Hold it up against the light" in line for line in plain["instructions"])
+    assert any("twice" in line for line in plain["instructions"]), (
+        "the double-pass trap has to be named, not merely avoided by implication"
+    )
 
 
 def test_a_white_base_profile_is_recorded_as_one():

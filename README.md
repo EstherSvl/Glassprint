@@ -554,8 +554,16 @@ Card 9 in the web interface fixes it, and it costs one small plate of glass.
    Print it exactly the way you print artwork; the profile measures the whole
    pipeline, Studio's colour handling included, so it has to see the same
    settings you actually use.
-2. **Photograph it** flat against a bright white background, with a little of
-   that background showing all round the plate. No flash, no HDR.
+2. **Photograph it** held up against the light — a bright window or a white
+   screen — with some of that light visible all round the plate. No flash, no
+   HDR.
+
+   Not laid on a lit sheet of paper. That sends the light through the glass,
+   off the paper and back through again, so every transmittance reads as its
+   own square. The fit absorbs that perfectly — into a density twice what it
+   should be — and then predicts everything far too dark for a piece anyone
+   holds up to a window. It is the one mistake here that produces a
+   confident-looking profile and no warning at all.
 3. **Read a photo of it.** That is the whole calibration.
 
 From then on the glaze preview is a prediction rather than an illustration, and
