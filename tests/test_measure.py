@@ -474,3 +474,127 @@ def test_the_substrate_survives_a_round_trip():
     restored = measure.Profile.from_dict(json.loads(profile.to_json()))
     assert restored.substrate == "white"
     assert restored.predict((90, 90, 90)) == profile.predict((90, 90, 90))
+
+
+# -- refusing a photograph that measures the wrong thing ---------------------
+
+
+def veiled(fraction: float, **kwargs) -> np.ndarray:
+    """A photograph with light reflecting off the front of the plate.
+
+    An additive fraction of the illumination reaching the camera without having
+    crossed the ink — which is what a window or lamp reflected in the glass
+    does, and what a front-lit shot of a *transparency* does everywhere at once.
+    """
+    photo = photograph(**kwargs).astype(np.float64) / 255.0
+    return np.clip(
+        measure.encode(measure.linear(photo) * (1 - fraction) + fraction) * 255.0, 0, 255
+    ).astype(np.uint8)
+
+
+def test_a_veiled_photograph_is_refused_and_says_why():
+    """The failure that produced a complete, plausible, meaningless profile.
+
+    A real plate came back with solid black passing 58% of bare glass, which no
+    ink can do. Nothing in the fit noticed: it returned a tone curve, a density
+    and a glass colour, all of them fiction.
+    """
+    for fraction in (0.2, 0.35):
+        with pytest.raises(measure.ReadError) as caught:
+            measure.read(veiled(fraction))
+        message = str(caught.value)
+        assert "black" in message and "reflect" in message, (fraction, message)
+
+    # Heavier than that and the chart cannot even be found — the veil washes out
+    # the contrast the detector needs. Still refused, just for a blunter reason.
+    with pytest.raises(measure.ReadError):
+        measure.read(veiled(0.6))
+
+
+def test_a_gentle_veil_still_reads():
+    """The check has to clear a single pass of black on glass, which is only
+    dark grey — refusing that would refuse every honest transparency."""
+    assert measure.read(veiled(0.06)).residuals()["held_out"] < 12.0
+
+
+def test_corners_disagreeing_in_colour_are_refused():
+    """All four print the same substrate, so they cannot differ in hue."""
+    photo = photograph().astype(np.float64) / 255.0
+    linear = measure.linear(photo)
+    linear[: linear.shape[0] // 2] *= np.array([1.0, 1.0, 3.5])  # a window in the top half
+    photo = np.clip(measure.encode(linear) * 255.0, 0, 255).astype(np.uint8)
+    with pytest.raises(measure.ReadError) as caught:
+        measure.read(photo)
+    assert "colour" in str(caught.value)
+
+
+def test_a_smooth_falloff_is_survivable_and_reported():
+    """A steep but smooth gradient is what the four corners are for.
+
+    Worth pinning down, because it was the first guess at what wrecked a real
+    plate and it turned out to be wrong: a 31x falloff across the frame still
+    read to 4 levels. Whatever spoils a reading, it is not smoothness.
+    """
+    photo = photograph().astype(np.float64) / 255.0
+    linear = measure.linear(photo)
+    ys, xs = np.mgrid[0 : linear.shape[0], 0 : linear.shape[1]]
+    radius = np.hypot(xs - linear.shape[1] * 0.15, ys - linear.shape[0] * 0.5)
+    linear *= (1.0 / (1.0 + (radius / (linear.shape[1] * 0.25)) ** 2))[:, :, None]
+    profile = measure.read(np.clip(measure.encode(linear) * 255.0, 0, 255).astype(np.uint8))
+    assert profile.residuals()["held_out"] < 8.0
+    assert "fell off" in profile.note, "it still has to say the light was bad"
+
+
+def test_a_plate_whose_repeat_disagrees_is_refused():
+    """The chart prints one colour twice; the two are a checksum on the read.
+
+    Broken here with a *local* hot spot rather than a gradient, because that is
+    what a bilinear reference cannot absorb — and, on the evidence, what a lamp
+    close to a plate actually does.
+    """
+    layout = measure.CHART
+    photo = photograph().astype(np.float64) / 255.0
+    linear = measure.linear(photo)
+
+    # Find where one of the two repeated patches landed, and shine on it.
+    corners = set(measure.glass_cells(layout))
+    order = [i for i in range(layout.columns * layout.rows) if i not in corners]
+    cell = order[measure.REPEAT[1]]
+    centre = layout.centres()[cell]
+    frame = np.array(
+        [[0.0, 0.0], [layout.frame_w_mm, 0.0],
+         [layout.frame_w_mm, layout.frame_h_mm], [0.0, layout.frame_h_mm]]
+    )
+    luma = linear @ np.array([0.2126, 0.7152, 0.0722])
+    quad = measure._locate(linear, luma, layout, frame)
+    spot = measure._project(measure._homography(frame, quad), centre[None, :])[0]
+
+    ys, xs = np.mgrid[0 : linear.shape[0], 0 : linear.shape[1]]
+    hot = np.exp(-(((xs - spot[0]) ** 2 + (ys - spot[1]) ** 2) / (2 * 90.0**2)))
+    linear *= (1.0 + 1.2 * hot)[:, :, None]
+
+    with pytest.raises(measure.ReadError) as caught:
+        measure.read(np.clip(measure.encode(linear) * 255.0, 0, 255).astype(np.uint8))
+    assert "levels apart" in str(caught.value)
+
+
+def test_the_held_out_patches_are_spread_over_the_whole_chart():
+    """Clustered in one corner they measure the lamp, not the model.
+
+    Left consecutive at the end of the list they all fell in the bottom-right
+    of the grid, and on a real plate with an uneven lamp the fit was fine while
+    the held-out error read 40 levels.
+    """
+    layout = measure.CHART
+    corners = set(measure.glass_cells(layout))
+    cells, colour = [], 0
+    for index in range(layout.columns * layout.rows):
+        if index in corners:
+            continue
+        if colour in measure.HELD_OUT:
+            cells.append(index)
+        colour += 1
+    assert len(cells) == len(measure.HELD_OUT)
+    assert len({index // layout.columns for index in cells}) == layout.rows, "every row"
+    columns = {index % layout.columns for index in cells}
+    assert len(columns) == len(cells), f"no two in the same column, got {sorted(columns)}"

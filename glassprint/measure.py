@@ -96,6 +96,12 @@ def colours() -> list[RGB]:
       The last of them repeats an earlier patch, which turns the difference
       between the two into a direct reading of the measurement's own noise —
       the number every other error here has to be judged against.
+
+    The held-out eight are **spread across the grid**, not left in a block at the
+    end. Consecutive, they all landed in the bottom-right corner of the chart,
+    which quietly turned the one number meant to measure *prediction* into a
+    measure of how uneven the lamp was on one side of the plate. A real reading
+    made that obvious: the fit was good and the held-out error was 40 levels.
     """
     cube = [
         (r, g, b)
@@ -114,15 +120,31 @@ def colours() -> list[RGB]:
         (40, 160, 150),
         (180, 90, 140),
     ]
-    return [(0, 0, 0), *cube, *greys, *held_out, held_out[0]]
+    fitted = [(0, 0, 0), *cube, *greys]
+    keep_back = [*held_out, held_out[0]]
+
+    out: list[RGB] = []
+    fitted_iter, held_iter = iter(fitted), iter(keep_back)
+    for index in range(len(fitted) + len(keep_back)):
+        out.append(next(held_iter) if index in _HELD_OUT_AT else next(fitted_iter))
+    return out
 
 
-#: Indices into :func:`colours` the fit never sees — the last eight, of which
-#: the final one is a repeat of the first.
-HELD_OUT = tuple(range(32, 40))
+#: Where in the reading order the held-out patches sit — two per row, and no two
+#: sharing a column.
+#:
+#: An even stride was the obvious way to spread them and does not work: the grid
+#: is 11 wide but its first and last rows are 9 long, because the corners are
+#: given over to bare substrate. Every fifth cell therefore beats against that
+#: and lands on just four columns out of eleven, clustered in two pairs. These
+#: are picked against the actual cell positions instead.
+_HELD_OUT_AT = frozenset((1, 6, 13, 18, 20, 26, 33, 38))
+
+#: Indices into :func:`colours` the fit never sees.
+HELD_OUT = tuple(sorted(_HELD_OUT_AT))
 
 #: The repeated patch, as ``(original, repeat)`` indices into :func:`colours`.
-REPEAT = (32, 39)
+REPEAT = (HELD_OUT[0], HELD_OUT[7])
 
 #: Index into :func:`colours` of the solid black cell.
 BLACK = 0
@@ -656,9 +678,30 @@ def read(
     )
     reference = weights @ bare
 
+    _refuse_if_veiled(samples, reference, bare, cells, black_cell)
+
     keep = [i for i in range(len(cells)) if i not in set(corner_cells)]
     ink = np.clip(samples[keep] / reference[keep], _FLOOR, 1.0)
     requested = np.array([cells[i] for i in keep], dtype=np.float64)
+
+    # The chart prints one colour twice. The two must agree, and how far they
+    # do not is the noise floor of the whole reading — no fit can be more
+    # consistent than the numbers it is fitted to. Checked before fitting,
+    # because a fit to noise still returns a tone curve and a density and looks
+    # for all the world like a measurement.
+    original, repeat = REPEAT
+    apart = float(np.abs(ink[original] - ink[repeat]).mean() * 255.0)
+    if apart > _MAX_REPEAT:
+        raise ReadError(
+            f"the same colour printed twice on this plate reads {apart:.0f} levels apart, so "
+            "nothing fitted to it would mean much. Two causes. Usually the light: a lamp or a "
+            "small window close to the plate falls off across it faster than the four corners "
+            "can correct — use a big even source, an overcast window or a screen filling the "
+            "frame, square on to the plate. Or the plate was printed from an older chart, whose "
+            "colours are in a different order; reprint it from the current file."
+        )
+
+    ratio = float(bare.max(axis=0).max() / max(bare.min(axis=0).min(), 1e-6))
 
     measured_glass = glass
     if measured_glass is None:
@@ -667,11 +710,83 @@ def read(
         )
 
     note = "measured"
+    if ratio > _MAX_CORNER_RATIO:
+        note = f"measured, but the light fell off {ratio:.1f}x across the plate — worth reshooting"
     if measured_glass is None:
         measured_glass = (255, 255, 255)
         note = "measured, but the glass colour could not be read — include some background around the plate"
 
     return fit(requested, ink, measured_glass, note=note, substrate=substrate)
+
+
+#: How much light the solid-black cell may still pass before the photograph is
+#: judged to be measuring a reflection rather than the print. One pass of black
+#: on glass is only dark grey, so this is deliberately generous; the reading it
+#: was written for sat at 0.53.
+_MAX_BLACK = 0.40
+
+#: How far apart the two prints of the repeated colour may read, in levels out
+#: of 255. This is the measurement measuring itself, so it is a hard ceiling on
+#: what any fit can achieve — a model cannot be more consistent than its data.
+_MAX_REPEAT = 12.0
+
+#: How much brighter one corner may be than another before the lamp is too
+#: uneven for a bilinear reference to straighten out.
+_MAX_CORNER_RATIO = 1.6
+
+#: How far the four bare-substrate corners may disagree in *colour*. Brightness
+#: is allowed to vary — that is the lamp, and the bilinear reference removes it.
+#: Hue is not: all four are the same substrate, so a difference means something
+#: that is not the substrate is being measured.
+_MAX_CORNER_CHROMA = 0.05
+
+
+def _refuse_if_veiled(
+    samples: np.ndarray,
+    reference: np.ndarray,
+    bare: np.ndarray,
+    cells: list,
+    black_cell: int,
+) -> None:
+    """Reject a photograph that is measuring light off the surface, not through it.
+
+    Both checks come free from cells the chart already has, and both were
+    written after a real plate came back unreadable in a way nothing else
+    noticed. The profile that plate produced was not obviously wrong — it had a
+    tone curve, a density, a glass colour. It was simply not a measurement of
+    the ink.
+
+    **The black cell.** Solid black is the most ink the printer can lay down, so
+    it is the darkest thing on the plate. Photographed properly it passes very
+    little. If it comes back bright, light is arriving at the camera without
+    having gone through the ink — a reflection off the front face, or flare.
+    That veil is *additive*, so it lands hardest on the darkest patches and
+    flattens the whole scale.
+
+    **The corners.** All four print the same substrate, so they may differ in
+    brightness — that is the lamp — but not in hue. When they do, something
+    coloured and not the substrate is in the light path. On the reading this was
+    written for, the two top corners carried four times the blue of the two
+    bottom ones: a window reflected in the upper half of the plate.
+    """
+    black = samples[black_cell] / np.maximum(reference[black_cell], 1e-6)
+    if float(np.mean(black)) > _MAX_BLACK:
+        raise ReadError(
+            f"solid black came back at {float(np.mean(black)):.0%} of bare substrate, so most "
+            "of what the camera saw never went through the ink. Light is reflecting off the "
+            "front of the plate — shoot it square-on with the light behind it (or, for an "
+            "opaque substrate, off to one side), and keep windows and lamps out of the reflection."
+        )
+
+    chroma = bare / np.maximum(bare.sum(axis=1, keepdims=True), 1e-6)
+    spread = float(np.ptp(chroma, axis=0).max())
+    if spread > _MAX_CORNER_CHROMA:
+        raise ReadError(
+            f"the four bare-substrate corners differ in colour by {spread:.2f}, which they "
+            "cannot do — they are the same glass. Something other than the substrate is in "
+            "the light path, usually a window or lamp reflected in part of the plate. "
+            "Move so the reflection is gone, then shoot again."
+        )
 
 
 def _glass_from_background(

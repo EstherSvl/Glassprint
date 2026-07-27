@@ -566,6 +566,20 @@ Card 9 in the web interface fixes it, and it costs one small plate of glass.
    confident-looking profile and no warning at all.
 3. **Read a photo of it.** That is the whole calibration.
 
+The read can be refused, and the refusals are the useful part — each one names
+a way a photograph can look fine and measure the wrong thing. All three came
+from real plates that produced complete, plausible, meaningless profiles:
+
+| Refusal | What it means |
+| --- | --- |
+| *solid black came back at N% of bare substrate* | Light is reflecting off the front face instead of passing through the ink. An additive veil, worst on the darkest patches, and it flattens the whole scale |
+| *the four corners differ in colour* | They are the same substrate, so they cannot. Something coloured is in the light path — usually a window reflected in part of the plate |
+| *the same colour printed twice reads N levels apart* | The chart's own checksum. A lamp close to the plate falls off faster than four corners can correct, and no fit is more consistent than its data |
+
+**One check covers all three: the solid black square should look properly
+black.** If it reads grey in the photograph, something is reaching the camera
+without going through the ink.
+
 From then on the glaze preview is a prediction rather than an illustration, and
 a second control appears: *I want this colour on the glass* → **ask the printer
 for this**. That is the useful direction. On dark green glass, asking for a deep
