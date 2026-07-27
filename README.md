@@ -681,32 +681,66 @@ confident wrong answer, which is why the chart prints which substrate it is for
 on the plate itself, and why a substrate the tool does not recognise is an error
 rather than a default.
 
-### How much white — the dial nobody has turned
+### How much white — and how the piece is lit
 
-Between those two ends is a range nothing has been measured in. Five layers of
-white is card. No white is a transparency. **One or two layers is neither**: a
-base thin enough to still pass light, so the piece reads one way lit from behind
-and another way lit from the front.
+`test-target/glassprint-white-base.png` is the tile — 140 × 46mm, or 56 × 31mm
+cut from an offcut, printed **once per white setting** with the number written in
+the blank. It carries a grey ramp by RGB value directly above the same ramp by
+alpha, sharing a column each, so one glance down a column says which mechanism is
+carrying tone.
 
-That is the effect a UV printer on glass can produce that neither paper nor a
-lightbox can, and no measurement taken through a lightbox alone will show it.
+Run on an opaque yellow cut in three at 0, 1 and 2 layers of white, and read both
+ways — each patch against bare glass beside it:
 
-`test-target/glassprint-white-base.png` is the tile for it — 140 × 46mm, meant to
-be **printed several times, once per white setting**, with a blank in the title
-to write the setting in. The layer count is a printer setting, so the file
-cannot vary it; what the file *can* vary is alpha, which is what drives the
-underbase, so that gets a row of its own. If alpha thins the white as well as the
-colour, the dial is in the artwork and not only in the RIP.
+| white | transmitted (backlit) | reflected (front-lit on black) |
+| --- | --- | --- |
+| none | 0.27 – 0.93, **3.4x** | 0.51 – 1.02, **2.0x** |
+| 1 layer | 0.26 – 1.15, 4.4x | 0.29 – 1.84, **6.3x** |
+| 2 layers | 0.23 – 0.97, 4.2x | inconclusive — plate too tilted to sample cleanly |
 
-| row | question |
-| --- | --- |
-| 1 · white alone | How opaque is the base? Six alpha levels, nothing else printed |
-| 2 · colour over it | Eight swatches, to compare against the same eight on bare glass |
-| 3 · black at falling alpha | Does the white thin with the colour, or stop all at once? |
+**Which number matters depends on how the piece will be seen, and the two
+disagree.** Backlit, the white base is a refinement: 3.4x to 4.4x. Front-lit it
+is the difference between flat and not: 2.0x to 6.3x, three times the range.
 
-Photograph every plate **twice** — once against a black card, which shows what
-the base is covering, and once backlit, which shows what still gets through. The
-difference between those two photographs is the whole point of the exercise.
+That follows from where the light turns round. With no white, a front-lit piece
+gives you surface reflection off the ink and whatever the glass itself bounces
+back, and opal glass passes a good deal of light rather than returning it. A
+white base is a strong diffuse reflector right behind the ink, so the light
+crosses it twice and comes back — which is also why those patches read *brighter*
+than bare glass, up to 1.84.
+
+**So: for opaque glass seen in reflection, use one layer of white.** Two was not
+better in any reading, on either substrate, and one layer is also where the base
+first became opaque on the earlier plates.
+
+Two smaller findings from the same plates. **Alpha and RGB value behave
+identically here** — within a tenth of each other in every row — so on a glass
+that carries tone at all, either mechanism will fade. And **white prints only as
+an underbase**: on the no-white plate, row 1 came out blank, so white in the
+artwork is not ink you can ask for on its own.
+
+### What is still confounded
+
+Clear green Artique with no white base gave a transmitted contrast of **1.2x**,
+against **3.4x** for the yellow. It is tempting to call that the spectral
+explanation confirmed — green passes a narrow band the ink barely absorbs in,
+yellow passes red and green together — and the first draft of this section did.
+
+It does not follow. The two plates differ in **two** ways: spectral width, and
+opacity. The green is a transparent cathedral glass and the yellow is opal. Either
+could produce that gap, and this pair cannot separate them.
+
+Settling it needs a third substrate that moves one variable alone — a
+*transparent* broad-band glass, or an *opaque* narrow-band one. Until then the
+honest statement is the measurement: some glass carries tone and some does not,
+the difference is large, and it is a property of the glass rather than of any
+setting on the printer. Which of the glass's two properties is responsible is
+open.
+
+Photograph every plate **twice** — once against a black card, once backlit. The
+two readings are not two views of one number; as the table above shows, they can
+point in different directions, and which one is right depends entirely on where
+the light will be when the finished piece is looked at.
 
 ## Glazing: building colours from different inks
 
