@@ -893,9 +893,12 @@ def _refuse_if_veiled(
     if float(np.mean(black)) > _MAX_BLACK:
         raise ReadError(
             f"solid black came back at {float(np.mean(black)):.0%} of bare substrate, so most "
-            "of what the camera saw never went through the ink. Light is reflecting off the "
-            "front of the plate — shoot it square-on with the light behind it (or, for an "
-            "opaque substrate, off to one side), and keep windows and lamps out of the reflection."
+            "of what the camera saw never went through the ink — it reflected off the front "
+            "face. Glass is a mirror as well as a window, and the commonest cause is the "
+            "light source itself: a plate lying flat on a screen, photographed from straight "
+            "above, sends the screen's reflection back into the lens. Tilt the camera fifteen "
+            "or twenty degrees off vertical so the reflection falls somewhere else. The "
+            "perspective that introduces is corrected for; the reflection is not."
         )
 
     chroma = bare[:, live] / np.maximum(bare[:, live].sum(axis=1, keepdims=True), 1e-6)
