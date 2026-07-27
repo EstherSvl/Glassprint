@@ -721,12 +721,15 @@ def read(
     black_cell = next(i for i, c in enumerate(cells) if c == (0, 0, 0))
     opposite = len(cells) - 1 - black_cell
 
+    spot_radius = 0.0
+
     def sample_all(quad: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        nonlocal spot_radius
         matrix = _homography(frame, quad)
         spots = _project(matrix, centres)
         scale = np.linalg.norm(spots[1] - spots[0]) / layout.pitch_mm
-        radius = 0.3 * layout.patch_mm * scale
-        return np.array([_sample(rgb, spot, radius) for spot in spots]), spots
+        spot_radius = 0.3 * layout.patch_mm * scale
+        return np.array([_sample(rgb, spot, spot_radius) for spot in spots]), spots
 
     samples, _ = sample_all(corners)
     # The four grid corners print nothing, so the chart is symmetric under a
@@ -754,15 +757,7 @@ def read(
             "not lit from behind at all"
         )
 
-    # The illumination where each patch sits, interpolated bilinearly from the
-    # four bare corners. This is what makes the reading immune to a lamp that
-    # falls off across the plate, which a phone's is guaranteed to do.
-    u = centres[:, 0] / layout.frame_w_mm
-    v = centres[:, 1] / layout.frame_h_mm
-    weights = np.stack(
-        [(1 - u) * (1 - v), u * (1 - v), (1 - u) * v, u * v], axis=1
-    )
-    reference = weights @ bare
+    reference = _illumination(rgb, layout, frame, corners, centres, bare, spot_radius)
 
     _refuse_if_veiled(samples, reference, bare, cells, black_cell, unmeasured)
 
@@ -910,6 +905,120 @@ def _refuse_if_veiled(
             "the light path, usually a window or lamp reflected in part of the plate. "
             "Move so the reflection is gone, then shoot again."
         )
+
+
+def _illumination(
+    rgb: np.ndarray,
+    layout: Layout,
+    frame: np.ndarray,
+    corners: np.ndarray,
+    centres: np.ndarray,
+    bare: np.ndarray,
+    radius: float,
+) -> np.ndarray:
+    """What the light is doing at each patch, from every bit of bare glass in shot.
+
+    Four corner cells and a bilinear surface was the first attempt, and it is
+    not enough. It removes a gradient exactly, and real illumination is not a
+    gradient: tilting the camera off a screen — which is how you stop the screen
+    reflecting into the lens — makes the screen's own brightness fall off
+    *curved*, because a panel dims with viewing angle. On a returned plate the
+    corners spanned 1.62x, the bilinear took out 1.19x of it, and the 1.27x it
+    left put two prints of one colour 23 levels apart.
+
+    But the chart is printed with a margin, and the margin is more bare glass,
+    all the way round. Adding a ring of it to the four corners gives enough
+    points to fit a curved surface instead of a flat one — sampled from the
+    photograph that is already in hand, at no cost to whoever took it.
+
+    The bottom edge is left out: the caption is printed there, and one dark
+    sample would drag the surface down across the whole lower half.
+    """
+    points = [np.column_stack([centres[list(glass_cells(layout))][:, 0],
+                               centres[list(glass_cells(layout))][:, 1]])]
+    values = [bare]
+
+    # Several distances out, not one. The chart's own margin is 2.5mm, but it
+    # gets printed on whatever offcut is to hand, so there is usually far more
+    # bare glass than that — and the further out the ring reaches, the better it
+    # pins the curvature. Anything that is not glass gets filtered below rather
+    # than guessed at here.
+    ring = []
+    for out in (1.5, 4.0, 8.0, 14.0):
+        for t in np.linspace(0.04, 0.96, 16):
+            ring.append([t * layout.frame_w_mm, -out])                      # above
+        for t in np.linspace(0.06, 0.94, 9):
+            ring.append([-out, t * layout.frame_h_mm])                      # left
+            ring.append([layout.frame_w_mm + out, t * layout.frame_h_mm])   # right
+
+    matrix = _homography(frame, corners)
+    ring = np.array(ring)
+    spots = _project(matrix, ring)
+    kept_points, kept_values = [], []
+    for point, spot in zip(ring, spots):
+        try:
+            kept_values.append(_sample(rgb, spot, radius * 0.5))
+            kept_points.append(point)
+        except ReadError:
+            continue  # off the edge of the photograph, or off the plate
+
+    if kept_points:
+        points.append(np.array(kept_points))
+        values.append(np.array(kept_values))
+
+    x = np.concatenate(points)
+    y = np.concatenate(values)
+
+    # Filter by *colour*, not brightness. Everything sampled out there should be
+    # the same glass, so it should share the corners' hue however bright it is.
+    # That rejects both things that go wrong: the caption and the plate's chipped
+    # edges are dark, and the lightbox beyond the plate's edge is bright and
+    # neutral — a brightness test catches one and misses the other, and a stray
+    # sample of the bare lightbox would bend the surface right across the chart.
+    want = bare.mean(axis=0)
+    want = want / max(want.sum(), 1e-9)
+    hue = y / np.maximum(y.sum(axis=1, keepdims=True), 1e-9)
+    keep = np.abs(hue - want).max(axis=1) <= 0.06
+    keep[: len(bare)] = True  # the corner cells are the reference by definition
+    if keep.sum() >= 8:
+        x, y = x[keep], y[keep]
+
+    u = x[:, 0] / layout.frame_w_mm
+    v = x[:, 1] / layout.frame_h_mm
+    design = np.stack([np.ones_like(u), u, v, u * v, u * u, v * v], axis=1)
+    if len(design) < 8:  # not enough to pin a quadratic; fall back to the corners
+        cu = centres[:, 0] / layout.frame_w_mm
+        cv = centres[:, 1] / layout.frame_h_mm
+        weights = np.stack([(1 - cu) * (1 - cv), cu * (1 - cv), (1 - cu) * cv, cu * cv], axis=1)
+        return weights @ bare
+
+    coefficients, *_ = np.linalg.lstsq(design, y, rcond=None)
+
+    def surface(su: np.ndarray, sv: np.ndarray) -> np.ndarray:
+        at = np.stack([np.ones_like(su), su, sv, su * sv, su * su, sv * sv], axis=1)
+        return np.maximum(at @ coefficients, 1e-6)
+
+    cu = centres[:, 0] / layout.frame_w_mm
+    cv = centres[:, 1] / layout.frame_h_mm
+    fitted = surface(cu, cv)
+
+    # The ring lives outside the frame and the patches live inside it, and the
+    # two are not on the same optical footing — further out is further from the
+    # middle of the lens and the middle of the screen, so the ring sits lower.
+    # Fitted to both, the surface came out 10-13% under the four corner cells it
+    # was supposed to pass through, and every patch then read that much too
+    # bright: the greys all clipped at "no ink at all".
+    #
+    # So the ring supplies the *shape* and the corners supply the *level*. The
+    # correction is itself bilinear across the four corners, which is exactly
+    # what the surface was before the ring was added — this only bends what sits
+    # between them.
+    corner_uv = centres[list(glass_cells(layout))]
+    fu = corner_uv[:, 0] / layout.frame_w_mm
+    fv = corner_uv[:, 1] / layout.frame_h_mm
+    correction = bare / np.maximum(surface(fu, fv), 1e-9)
+    weights = np.stack([(1 - cu) * (1 - cv), cu * (1 - cv), (1 - cu) * cv, cu * cv], axis=1)
+    return np.maximum(fitted * (weights @ correction), 1e-6)
 
 
 def _glass_from_background(

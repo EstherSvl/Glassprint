@@ -598,3 +598,55 @@ def test_the_held_out_patches_are_spread_over_the_whole_chart():
     assert len({index // layout.columns for index in cells}) == layout.rows, "every row"
     columns = {index % layout.columns for index in cells}
     assert len(columns) == len(cells), f"no two in the same column, got {sorted(columns)}"
+
+
+def test_the_illumination_surface_passes_through_the_corner_cells():
+    """The ring bends the surface; the corners still set its level.
+
+    Fitted to the ring and the corners together, the surface came out 10-13%
+    below the four corner cells it was meant to interpolate — because the ring
+    sits outside the frame, further from the middle of the lens and of the
+    lightbox, and therefore lower. Every patch then read that much too bright,
+    which on a substrate with little tonal range is the difference between a
+    grey and no ink at all.
+    """
+    layout = measure.CHART
+    photo = photograph(plate_margin_mm=14.0)
+    rgb = measure.linear(photo.astype(np.float64) / 255.0)
+    luma = rgb @ np.array([0.2126, 0.7152, 0.0722])
+    frame = np.array(
+        [[0.0, 0.0], [layout.frame_w_mm, 0.0],
+         [layout.frame_w_mm, layout.frame_h_mm], [0.0, layout.frame_h_mm]]
+    )
+    corners = measure._locate(rgb, luma, layout, frame)
+    centres = layout.centres()
+    spots = measure._project(measure._homography(frame, corners), centres)
+    radius = 0.3 * layout.patch_mm * np.linalg.norm(spots[1] - spots[0]) / layout.pitch_mm
+    samples = np.array([measure._sample(rgb, spot, radius) for spot in spots])
+    cells = list(measure.glass_cells(layout))
+
+    surface = measure._illumination(
+        rgb, layout, frame, corners, centres, samples[cells], radius
+    )
+    for cell in cells:
+        off = np.abs(surface[cell] / np.maximum(samples[cell], 1e-9) - 1.0).max()
+        assert off < 0.05, f"cell {cell} off by {off:.1%}"
+
+
+def test_a_stray_sample_of_the_lightbox_cannot_bend_the_surface():
+    """Beyond the plate's edge is the lamp, which is bright and neutral.
+
+    Rejecting outliers by brightness catches the caption and the chipped edges,
+    which are dark, and misses this entirely — so the filter goes by hue, which
+    the substrate has and the lightbox does not.
+    """
+    layout = measure.CHART
+    photo = photograph(plate_margin_mm=2.5)  # ring reaches past the plate
+    rgb = measure.linear(photo.astype(np.float64) / 255.0)
+    luma = rgb @ np.array([0.2126, 0.7152, 0.0722])
+    frame = np.array(
+        [[0.0, 0.0], [layout.frame_w_mm, 0.0],
+         [layout.frame_w_mm, layout.frame_h_mm], [0.0, layout.frame_h_mm]]
+    )
+    profile = measure.read(photo)
+    assert profile.residuals()["held_out"] < 4.0, profile.residuals()
