@@ -180,7 +180,11 @@ button.ghost:hover { color: var(--text); border-color: var(--accent); }
 .readout dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px 16px; margin: 0 0 8px; }
 .readout dt { font-size: 10px; text-transform: uppercase; letter-spacing: .07em; }
 .readout dd { margin: 0; color: var(--text); }
-.readout .note { color: var(--accent); margin: 2px 0; }
+/* A warning wants attention; a note is the tool reporting which path it took.
+   Same colour for both made every graceful fallback look like a fault. */
+.readout .warn-note { color: var(--accent); margin: 2px 0; }
+.readout .note { color: var(--muted); margin: 2px 0; }
+.readout .note::before { content: "· "; }
 
 #export-result { font-size: 12px; }
 #export-result ul { margin: 8px 0 0; padding-left: 0; list-style: none; }

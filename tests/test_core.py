@@ -308,3 +308,44 @@ def test_the_black_point_survives_a_later_brightness_change():
     art[0, 0] = (20, 20, 24, 255)
     out = recolor.apply(art, recolor.ColorSpec(black_point=0.12, brightness=1.4))
     assert tuple(out[0, 0, :3]) == (0, 0, 0)
+
+
+# -- optional models that are not installed ---------------------------------
+
+
+def test_a_missing_model_reads_as_a_choice_not_a_crash():
+    """The fallback is the documented path, not a fault.
+
+    The first wording was "CLIPSeg unavailable (ModuleNotFoundError); falling
+    back to..." rendered in the same colour as real warnings. Nothing had gone
+    wrong — the model is optional and the colour path is what the tool is built
+    to do without it — but it read as a broken tool.
+    """
+    from glassprint import segment
+
+    backends = segment.Backends()
+    backends.fallback("Matched what you described", "colour and tone", "smart")
+    note = backends.notes[0]
+    for jargon in ("unavailable", "Error", "fall", "failed"):
+        assert jargon not in note, f"{jargon!r} in {note!r}"
+    assert note.startswith("Matched what you described")
+
+
+def test_a_tablet_is_not_told_to_pip_install():
+    """A browser tab cannot install torch, and never will be able to."""
+    from glassprint import segment
+
+    was = segment.IN_BROWSER
+    try:
+        segment.IN_BROWSER = True
+        backends = segment.Backends()
+        backends.fallback("Cut the subject out", "colour, not by shape", "smart")
+        assert "pip" not in backends.notes[0]
+        assert "desktop" in backends.notes[0]
+
+        segment.IN_BROWSER = False
+        desktop = segment.Backends()
+        desktop.fallback("Cut the subject out", "colour, not by shape", "smart")
+        assert "pip install" in desktop.notes[0]
+    finally:
+        segment.IN_BROWSER = was

@@ -207,9 +207,13 @@ function renderReadout(summary) {
 
   renderRecipes(summary.glaze);
 
-  const notes = (warnings.concat(summary.notes || []))
-    .map((n) => `<p class="note">${escapeHtml(n)}</p>`)
-    .join("");
+  // Two kinds, and they were one kind for too long. A warning is something to
+  // act on; a note is the tool saying which of several working paths it took.
+  // Rendered identically, in the same alarm colour, a graceful fallback read as
+  // a failure — and the one on a tablet recommended a fix a tablet cannot apply.
+  const notes =
+    warnings.map((n) => `<p class="warn-note">${escapeHtml(n)}</p>`).join("") +
+    (summary.notes || []).map((n) => `<p class="note">${escapeHtml(n)}</p>`).join("");
   $("readout").innerHTML =
     "<dl>" +
     rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${escapeHtml(String(v))}</dd></div>`).join("") +

@@ -223,3 +223,15 @@ def test_the_readout_judges_its_own_noise():
     for verdict in ("clean", "usable", "too noisy to trust"):
         assert verdict in source, verdict
     assert "louder than the ink" in source, "a noisy read must fail loudly, not pass quietly"
+
+
+def test_notes_and_warnings_are_styled_apart():
+    """A fallback that worked must not wear the colour of a fault."""
+    app = (ROOT / "glassprint" / "web" / "app.js").read_text()
+    css = (ROOT / "glassprint" / "web" / "style.css").read_text()
+    assert 'class="warn-note"' in app and 'class="note"' in app
+    assert ".readout .warn-note" in css and ".readout .note" in css
+    accent = css[css.index(".readout .warn-note") : css.index(".readout .warn-note") + 90]
+    plain = css[css.index(".readout .note {") : css.index(".readout .note {") + 90]
+    assert "var(--accent)" in accent
+    assert "var(--accent)" not in plain, "notes must not share the warning colour"

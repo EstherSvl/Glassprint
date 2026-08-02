@@ -8,6 +8,7 @@ tone heuristics, so the tool is useful with nothing downloaded.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -31,6 +32,12 @@ class Selector:
         if self.value:
             return f"{self.kind}:{self.value}"
         return self.kind
+
+
+#: Pyodide reports this platform, and it is the one place where "install the
+#: extra" is not advice — a browser tab cannot install torch, and never will be
+#: able to. Telling someone to do the impossible reads as a broken tool.
+IN_BROWSER = sys.platform == "emscripten"
 
 
 class Backends:
@@ -66,6 +73,21 @@ class Backends:
         if message not in self.notes:
             self.notes.append(message)
 
+    def fallback(self, what: str, instead: str, extra: str) -> None:
+        """Record that an optional model was missing and something else ran.
+
+        Deliberately not phrased as a failure. Nothing went wrong: the model is
+        optional, the fallback is the documented path, and on a tablet it is the
+        *only* path. The first version of this said "CLIPSeg unavailable
+        (ModuleNotFoundError)" in the same warning colour the real problems use,
+        which made a working tool look broken and offered a remedy that half the
+        installs cannot perform.
+        """
+        if IN_BROWSER:
+            self.note(f"{what} by {instead} — object models need a desktop install, not a tablet.")
+        else:
+            self.note(f"{what} by {instead}. For true object selection: pip install -e \".[{extra}]\"")
+
     # -- rembg (subject cutout) --------------------------------------------
 
     def subject_mask(self, raster: Raster) -> np.ndarray | None:
@@ -81,7 +103,7 @@ class Backends:
             return masks.clean(np.asarray(cut, dtype=np.float32) / 255.0)
         except Exception as exc:  # pragma: no cover - depends on optional install
             self._rembg_failed = True
-            self.note(f"rembg unavailable ({exc.__class__.__name__}); using colour-based background removal")
+            self.fallback("Cut the subject out", "colour, not by shape", "smart")
             return None
 
     # -- CLIPSeg (text-driven regions) -------------------------------------
@@ -112,10 +134,7 @@ class Backends:
             return masks.resize(probs, raster.width, raster.height)
         except Exception as exc:  # pragma: no cover - depends on optional install
             self._clipseg_failed = True
-            self.note(
-                f"CLIPSeg unavailable ({exc.__class__.__name__}); "
-                "falling back to colour/tone matching for described regions"
-            )
+            self.fallback("Matched what you described", "colour and tone", "smart")
             return None
 
 
