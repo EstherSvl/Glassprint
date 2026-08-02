@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import typer
 
 from . import __version__
 from .colors import parse_color, to_hex
-from .compose import ComposeSpec, GlazeSpec, compose
+from .compose import ComposeSpec, GlazeSpec, LayerSpec, compose
 from .export import ExportSpec, export
 from .fade import Fade
 from .nl import build_plan
@@ -91,9 +92,9 @@ def mask(
 @app.command("compose")
 def compose_command(
     base: Path = typer.Argument(..., exists=True, dir_okay=False, help="Procreate/Affinity export."),
-    overlay: Path = typer.Argument(..., exists=True, dir_okay=False, help="Pattern or motif to apply."),
+    overlay: List[Path] = typer.Argument(..., exists=True, dir_okay=False, help="Pattern or motif to apply. Give several to stack them."),
     out: Path = typer.Option(Path("out"), "--out", "-o", help="Output directory."),
-    keep: str = typer.Option("", "--keep", "-k", help="What to keep/remove from the overlay."),
+    keep: List[str] = typer.Option([], "--keep", "-k", help="What to keep/remove. Repeat to say something different for each overlay."),
     target: str = typer.Option("alpha", "--target", help="alpha | describe | largest | full | rect"),
     target_describe: str = typer.Option("", "--target-describe", help="Describe the area to fill."),
     fit: str = typer.Option("auto", "--fit", help="auto | shape | contain | cover | tile | stretch"),
@@ -131,8 +132,8 @@ def compose_command(
     fade_halftone_angle: float = typer.Option(45.0, "--fade-halftone-angle", help="Screen angle in degrees."),
     fade_invert: bool = typer.Option(False, "--fade-invert"),
     fade_cutoff: float = typer.Option(0.0, "--fade-cutoff", help="Snap alpha below this to zero (~0.12 for UV)."),
-    opacity: float = typer.Option(1.0, "--opacity"),
-    blend: str = typer.Option("normal", "--blend", help="normal | multiply | screen | overlay"),
+    opacity: List[float] = typer.Option([], "--opacity", help="Repeat for each overlay."),
+    blend: List[str] = typer.Option([], "--blend", help="normal | multiply | screen | overlay. Repeat for each overlay."),
     no_clip: bool = typer.Option(False, "--no-clip", help="Do not clip the overlay to the shape."),
     feather: float = typer.Option(0.0, "--feather", help="Soften the shape edge, in pixels."),
     formats: str = typer.Option("png", "--format", "-f", help="Comma separated: png,jpg,tiff,webp,bmp"),
@@ -152,7 +153,29 @@ def compose_command(
 ) -> None:
     """Compose the overlay onto the base image and export the result."""
     base_raster = Raster.open(base)
-    overlay_raster = Raster.open(overlay)
+    overlay_rasters = [Raster.open(path) for path in overlay]
+
+    def per_overlay(values: list, default):
+        """One value each, or one value for all of them.
+
+        Say ``--keep`` once and every overlay is cut the same way; say it as
+        many times as there are overlays and each gets its own. Anything in
+        between is a miscount worth stopping for, not guessing at.
+        """
+        if not values:
+            return [default] * len(overlay_rasters)
+        if len(values) == 1:
+            return [values[0]] * len(overlay_rasters)
+        if len(values) != len(overlay_rasters):
+            raise typer.BadParameter(
+                f"got {len(values)} values for {len(overlay_rasters)} overlays — "
+                "give one for all of them, or one each"
+            )
+        return list(values)
+
+    keeps = per_overlay(keep, "")
+    opacities = per_overlay(opacity, 1.0)
+    blends = per_overlay(blend, "normal")
 
     color_spec = ColorSpec(
         mode=color_mode if color else "none",
@@ -166,26 +189,27 @@ def compose_command(
         brightness=brightness,
         contrast=contrast,
     )
+    placement_spec = Placement(
+        fit=fit,
+        repeat_across=repeats,
+        repeat_mm=repeat_mm,
+        scale=scale,
+        rotation=rotation,
+        offset_x=offset_x,
+        offset_y=offset_y,
+        mirror=mirror,
+    )
     spec = ComposeSpec(
-        keep=keep,
+        keep=keeps[0],
         tolerance=tolerance,
         use_claude=claude,
         target=target,
         target_describe=target_describe,
         clip_to_shape=not no_clip,
         shape_feather=feather,
-        opacity=opacity,
-        blend=blend,
-        placement=Placement(
-            fit=fit,
-            repeat_across=repeats,
-            repeat_mm=repeat_mm,
-            scale=scale,
-            rotation=rotation,
-            offset_x=offset_x,
-            offset_y=offset_y,
-            mirror=mirror,
-        ),
+        opacity=opacities[0],
+        blend=blends[0],
+        placement=placement_spec,
         color=color_spec,
         fade=Fade(
             mode=fade,
@@ -214,9 +238,27 @@ def compose_command(
             colours=glaze_colours,
         ),
     )
+    # Placement, colour and fade stay shared across overlays here; what differs
+    # per motif on the command line is what to cut out of it and how it sits
+    # over what is beneath. The full per-layer spec is in the UI and the bridge.
+    if len(overlay_rasters) > 1:
+        spec = replace(
+            spec,
+            layers=[
+                LayerSpec(
+                    keep=one_keep,
+                    opacity=one_opacity,
+                    blend=one_blend,
+                    placement=placement_spec,
+                    color=color_spec,
+                    fade=spec.fade,
+                )
+                for one_keep, one_opacity, one_blend in zip(keeps, opacities, blends)
+            ],
+        )
 
     backends = Backends()
-    result = compose(base_raster, overlay_raster, spec, backends)
+    result = compose(base_raster, overlay_rasters, spec, backends)
 
     export_spec = ExportSpec(
         formats=[f.strip() for f in formats.split(",") if f.strip()],
@@ -234,8 +276,11 @@ def compose_command(
         typer.echo(json.dumps({"files": manifest, "summary": result.summary()}, indent=2))
         return
 
-    typer.secho(f"composed {base.name} + {overlay.name}", fg=typer.colors.GREEN)
-    typer.echo(f"  overlay plan : {result.plan.describe()}  [{result.plan.source}]")
+    art = " + ".join(path.name for path in overlay)
+    typer.secho(f"composed {base.name} + {art}", fg=typer.colors.GREEN)
+    for index, layer in enumerate(result.layers):
+        label = "overlay plan" if len(result.layers) == 1 else f"overlay {index + 1} plan"
+        typer.echo(f"  {label:<13}: {layer.plan.describe()}  [{layer.plan.source}]")
     typer.echo(
         f"  artwork      : {'pattern' if result.info.is_pattern else 'motif'} — {result.info.reason}"
     )

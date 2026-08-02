@@ -221,6 +221,40 @@ The overlay is clipped to that shape by default (`--no-clip` turns it off), and
 `--feather` softens the edge, which reads better on curved silhouettes than a
 hard 1-bit cut.
 
+## More than one overlay
+
+Give `compose` several pieces of artwork and they stack in order, the last one on
+top:
+
+```bash
+glassprint compose panel.png flowers.png border.png \
+  --keep "remove the white background" \
+  --opacity 1.0 --opacity 0.45 \
+  --blend normal --blend multiply
+```
+
+`--keep`, `--opacity` and `--blend` take either one value for all of them or one
+value each; anything in between is a miscount and stops rather than guesses. In
+the browser, "+ another overlay" adds a drop zone with those three settings under
+it.
+
+Which part of the base you are filling, whether to clip, and the glaze are
+properties of the *panel*, so they stay shared — two motifs on one plate are
+still one print. Placement, colour and fade are per artwork in the UI and the
+Python API; on the command line they stay shared, and `LayerSpec` is there if you
+want the full per-layer control from a script.
+
+Two things are worth knowing because they are genuinely ambiguous rather than
+merely unimplemented:
+
+- **The overlay-only file is not the composite.** The stack is alpha-over, in
+  order, so the single file you hand the printer carries every motif. The
+  on-screen composite instead blends each layer onto the base with *its own*
+  mode, and multiply against the panel is not multiply against the motif beneath.
+- **A stacked fade counts printed passes**, and two overlays each asking for a
+  different count is unanswerable. The first layer's map is used and the tool
+  says so in a note rather than averaging it into something that looks decided.
+
 ## Colour
 
 `--color` with `--color-mode`:
@@ -858,6 +892,10 @@ Every export writes:
 
 Optionally also the shape mask and the cut-out mask (`--export composite,overlay,shape-mask,cutout-mask`),
 which are handy for checking what the tool decided.
+
+With several overlays, `--export overlays` writes one file per piece of artwork
+as well — for when you are not printing them in one go, or a motif goes on a
+different part of the object.
 
 Set the physical size with `--width-mm` (or `--height-mm`) and `--dpi`. The files
 are resampled and tagged so the printer places the art at that size — both layers

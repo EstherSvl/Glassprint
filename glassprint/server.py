@@ -95,6 +95,14 @@ def create_app() -> FastAPI:
 
     @app.post("/api/call/{method}")
     def call(method: str, payload: dict[str, Any]) -> JSONResponse:
+        if method == "drop":
+            sid, session = _session(payload.get("session_id"), create=True)
+            try:
+                return JSONResponse(
+                    {"session_id": sid, **session.drop_image(str(payload.get("role") or ""))}
+                )
+            except BridgeError as exc:
+                raise _http(exc)
         if method not in CALLABLE:
             raise HTTPException(status_code=404, detail=f"unknown method {method!r}")
         sid, session = _session(payload.get("session_id"), create=True)

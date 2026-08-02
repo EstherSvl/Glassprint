@@ -15,7 +15,12 @@ const state = {
   lastPreview: null,
   inFlight: null,
   capabilities: null,
+  /* Roles of the overlays beyond the first, in stacking order. The first is
+   * plain "overlay" and lives in the markup; these are built as you add them. */
+  extraOverlays: [],
 };
+
+const MAX_OVERLAYS = 8;
 
 /* ------------------------------------------------------------------ status */
 
@@ -38,9 +43,82 @@ function checkedValues(containerId) {
   return Array.from($(containerId).querySelectorAll("input:checked")).map((el) => el.value);
 }
 
+/* Per-overlay settings, first one included, in stacking order.
+ *
+ * Sent only when there is more than one piece of artwork. With a single
+ * overlay the list stays empty and the top-level fields carry it, which is what
+ * every saved preset and every older caller already sends. */
+function buildLayers(shared) {
+  /* An added slot with nothing dropped in it yet is skipped, because the server
+   * only holds the overlays that were actually uploaded — sending a settings
+   * entry for an empty slot would shift every later one onto the wrong image. */
+  const filled = state.extraOverlays.filter((role) => state.images[role]);
+  if (!filled.length) return [];
+
+  const first = {
+    keep: $("keep").value,
+    edge_feather: Number($("edge-feather").value),
+    opacity: Number($("opacity").value),
+    blend: $("blend").value,
+    ...shared,
+  };
+  const rest = filled.map((role) => ({
+    keep: $(`keep-${role}`).value,
+    edge_feather: Number($("edge-feather").value),
+    opacity: Number($(`opacity-${role}`).value),
+    blend: $(`blend-${role}`).value,
+    ...shared,
+  }));
+  return [first, ...rest];
+}
+
 function buildSpec() {
+  const placement = {
+    fit: $("fit").value,
+    repeat_across: num("repeat-across"),
+    repeat_mm: num("repeat-mm"),
+    scale: Number($("scale").value),
+    rotation: Number($("rotation").value),
+    offset_x: Number($("offset-x").value),
+    offset_y: Number($("offset-y").value),
+    mirror: $("mirror").value,
+    flip_h: $("flip-h").checked,
+    flip_v: $("flip-v").checked,
+  };
+  const color = {
+    mode: $("color-mode").value,
+    color: $("color-hex").value,
+    color2: $("color2-hex").value,
+    from_color: $("from-color-hex").value,
+    strength: Number($("strength").value),
+    hue_shift: Number($("hue-shift").value),
+    saturation: Number($("saturation").value),
+    brightness: Number($("brightness").value),
+    contrast: Number($("contrast").value),
+  };
+  const fade = {
+    mode: state.fadeMode,
+    what: $("fade-what").value,
+    angle: Number($("fade-angle").value),
+    center_x: Number($("fade-center-x").value),
+    center_y: Number($("fade-center-y").value),
+    start: Number($("fade-start").value),
+    end: Number($("fade-end").value),
+    curve: Number($("fade-curve").value),
+    min_alpha: Number($("fade-min").value),
+    max_alpha: Number($("fade-max").value),
+    per_element: $("fade-per-element").checked,
+    dissolve: Number($("fade-dissolve").value),
+    seed: num("fade-seed", 0),
+    layers: Number($("fade-layers").value),
+    halftone_mm: Number($("fade-halftone").value),
+    halftone_angle: Number($("fade-halftone-angle").value),
+    invert: $("fade-invert").checked,
+    cutoff: Number($("fade-cutoff").value),
+  };
   return {
     session_id: state.sessionId,
+    layers: buildLayers({ placement, color, fade }),
     keep: $("keep").value,
     tolerance: Number($("tolerance").value),
     use_claude: $("use-claude").checked,
@@ -52,49 +130,9 @@ function buildSpec() {
     edge_feather: Number($("edge-feather").value),
     opacity: Number($("opacity").value),
     blend: $("blend").value,
-    placement: {
-      fit: $("fit").value,
-      repeat_across: num("repeat-across"),
-      repeat_mm: num("repeat-mm"),
-      scale: Number($("scale").value),
-      rotation: Number($("rotation").value),
-      offset_x: Number($("offset-x").value),
-      offset_y: Number($("offset-y").value),
-      mirror: $("mirror").value,
-      flip_h: $("flip-h").checked,
-      flip_v: $("flip-v").checked,
-    },
-    color: {
-      mode: $("color-mode").value,
-      color: $("color-hex").value,
-      color2: $("color2-hex").value,
-      from_color: $("from-color-hex").value,
-      strength: Number($("strength").value),
-      hue_shift: Number($("hue-shift").value),
-      saturation: Number($("saturation").value),
-      brightness: Number($("brightness").value),
-      contrast: Number($("contrast").value),
-    },
-    fade: {
-      mode: state.fadeMode,
-      what: $("fade-what").value,
-      angle: Number($("fade-angle").value),
-      center_x: Number($("fade-center-x").value),
-      center_y: Number($("fade-center-y").value),
-      start: Number($("fade-start").value),
-      end: Number($("fade-end").value),
-      curve: Number($("fade-curve").value),
-      min_alpha: Number($("fade-min").value),
-      max_alpha: Number($("fade-max").value),
-      per_element: $("fade-per-element").checked,
-      dissolve: Number($("fade-dissolve").value),
-      seed: num("fade-seed", 0),
-      layers: Number($("fade-layers").value),
-      halftone_mm: Number($("fade-halftone").value),
-      halftone_angle: Number($("fade-halftone-angle").value),
-      invert: $("fade-invert").checked,
-      cutoff: Number($("fade-cutoff").value),
-    },
+    placement,
+    color,
+    fade,
     glaze: {
       enabled: $("glaze-on").checked,
       glass: $("glass-color").value,
@@ -180,6 +218,18 @@ function renderReadout(summary) {
     ["Suggested repeats", `${pattern.suggested_repeats} across the shape`],
     ["Cut-out", `${summary.plan} — ${Math.round(summary.cutout_coverage * 100)}% of the artwork kept`],
   ];
+
+  // With one overlay the row above says everything. With several, each one gets
+  // its own line, because "the cut-out" stops being a single thing.
+  const layers = summary.layers || [];
+  if (layers.length > 1) {
+    layers.forEach((layer, index) => {
+      rows.push([
+        `Overlay ${index + 1}`,
+        `${layer.plan} — ${Math.round(layer.coverage * 100)}% kept · ${layer.blend}`,
+      ]);
+    });
+  }
 
   // Below 10% a whole-number percentage rounds to a useless "0%".
   const asCoverage = (v) => (v < 0.1 ? `${(v * 100).toFixed(1)}%` : `${Math.round(v * 100)}%`);
@@ -297,6 +347,104 @@ function describeImage(role, image) {
   const alpha = image.has_alpha ? "transparent areas" : "no transparency";
   $(`meta-${role}`).textContent =
     `${image.width}×${image.height} px · ${image.size_mm[0]}×${image.size_mm[1]} mm · ${dpi} · ${alpha}`;
+}
+
+/* --------------------------------------------------------- overlay slots */
+
+/* The server numbers overlays from one but names the first plainly, because it
+ * is the only one most jobs use and renaming it would break every saved preset. */
+function overlayRole(index) {
+  return index === 0 ? "overlay" : `overlay${index + 1}`;
+}
+
+function addOverlaySlot() {
+  const index = state.extraOverlays.length + 1;
+  if (index + 1 > MAX_OVERLAYS) return;
+  const role = overlayRole(index);
+
+  const slot = document.createElement("div");
+  slot.className = "overlay-slot";
+  slot.id = `slot-${role}`;
+  slot.innerHTML = `
+    <label class="drop" id="drop-${role}">
+      <input type="file" id="file-${role}" accept="image/*,.psd" hidden />
+      <div class="drop-inner">
+        <img class="thumb" id="thumb-${role}" alt="" hidden />
+        <div class="drop-label">
+          <strong>Overlay ${index + 1}</strong>
+          <span id="meta-${role}">pattern or motif — drop it here</span>
+        </div>
+      </div>
+    </label>
+    <div class="row">
+      <label class="field">
+        <span>Keep from this one</span>
+        <input type="text" id="keep-${role}" placeholder="remove the white background" />
+      </label>
+    </div>
+    <div class="row">
+      <label class="field">
+        <span>Opacity</span>
+        <input type="range" id="opacity-${role}" min="0" max="1" step="0.01" value="1" />
+      </label>
+      <label class="field">
+        <span>Blend</span>
+        <select id="blend-${role}">
+          <option value="normal">Normal</option>
+          <option value="multiply">Multiply</option>
+          <option value="screen">Screen</option>
+          <option value="overlay">Overlay</option>
+        </select>
+      </label>
+      <button type="button" class="ghost" id="remove-${role}">remove</button>
+    </div>`;
+
+  $("extra-overlays").appendChild(slot);
+  state.extraOverlays.push(role);
+  wireDropZone(role);
+  [`keep-${role}`, `opacity-${role}`, `blend-${role}`].forEach((id) =>
+    $(id).addEventListener("input", () => schedulePreview())
+  );
+  $(`remove-${role}`).addEventListener("click", () => removeOverlaySlot(role));
+  $("add-overlay").disabled = state.extraOverlays.length + 1 >= MAX_OVERLAYS;
+}
+
+async function removeOverlaySlot(role) {
+  /* Slot numbers are positions, not names: dropping the middle of three makes
+   * the third into the second. Rather than renumber the DOM, the whole extra
+   * stack is torn down and rebuilt from what the server says it still holds. */
+  const kept = state.extraOverlays
+    .filter((each) => each !== role)
+    .map((each) => ({
+      image: state.images[each],
+      keep: $(`keep-${each}`).value,
+      opacity: $(`opacity-${each}`).value,
+      blend: $(`blend-${each}`).value,
+    }));
+
+  try {
+    if (state.images[role]) await backend().drop(role, state.sessionId);
+  } catch (error) {
+    setStatus(error.message, "error");
+    return;
+  }
+
+  state.extraOverlays.forEach((each) => delete state.images[each]);
+  $("extra-overlays").replaceChildren();
+  state.extraOverlays = [];
+  $("add-overlay").disabled = false;
+
+  kept.forEach((slot, position) => {
+    addOverlaySlot();
+    const newRole = state.extraOverlays[position];
+    $(`keep-${newRole}`).value = slot.keep;
+    $(`opacity-${newRole}`).value = slot.opacity;
+    $(`blend-${newRole}`).value = slot.blend;
+    if (!slot.image) return;
+    state.images[newRole] = slot.image;
+    describeImage(newRole, slot.image);
+  });
+  schedulePreview(0);
 }
 
 function wireDropZone(role) {
@@ -714,6 +862,7 @@ async function loadCapabilities() {
 function init() {
   wireDropZone("base");
   wireDropZone("overlay");
+  $("add-overlay").addEventListener("click", addOverlaySlot);
 
   bindSegmented("target-modes", (value) => {
     state.target = value;

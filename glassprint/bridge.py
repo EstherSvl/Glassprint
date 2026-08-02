@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from dataclasses import replace
 from pathlib import PurePosixPath
 from typing import Any
@@ -22,7 +23,7 @@ import numpy as np
 
 from . import __version__
 from .colors import parse_color, to_hex
-from .compose import ComposeResult, ComposeSpec, GlazeSpec, compose
+from .compose import ComposeResult, ComposeSpec, GlazeSpec, LayerSpec, compose
 from .export import ExportSpec, bundle, render
 from .fade import Fade
 from .measure import Profile
@@ -115,11 +116,86 @@ def _optional_float(value: Any) -> float | None:
     return out if out > 0 else None
 
 
+def build_placement(data: dict[str, Any]) -> Placement:
+    return Placement(
+        fit=str(data.get("fit") or "auto"),
+        repeat_across=_optional_float(data.get("repeat_across")),
+        repeat_mm=_optional_float(data.get("repeat_mm")),
+        scale=_float(data.get("scale"), 1.0),
+        rotation=_float(data.get("rotation"), 0.0),
+        offset_x=_float(data.get("offset_x"), 0.0),
+        offset_y=_float(data.get("offset_y"), 0.0),
+        mirror=str(data.get("mirror") or "auto"),
+        flip_h=bool(data.get("flip_h")),
+        flip_v=bool(data.get("flip_v")),
+    )
+
+
+def build_color(data: dict[str, Any], tolerance: float) -> ColorSpec:
+    return ColorSpec(
+        mode=str(data.get("mode") or "none"),
+        color=data.get("color") or None,
+        color2=data.get("color2") or None,
+        from_color=data.get("from_color") or None,
+        strength=_float(data.get("strength"), 1.0),
+        tolerance=tolerance,
+        hue_shift=_float(data.get("hue_shift"), 0.0),
+        saturation=_float(data.get("saturation"), 1.0),
+        brightness=_float(data.get("brightness"), 1.0),
+        contrast=_float(data.get("contrast"), 1.0),
+        invert=bool(data.get("invert")),
+        black_point=_float(data.get("black_point"), 0.0),
+    )
+
+
+def build_fade(data: dict[str, Any]) -> Fade:
+    return Fade(
+        mode=str(data.get("mode") or "none"),
+        what=str(data.get("what") or ""),
+        angle=_float(data.get("angle"), 90.0),
+        center_x=_float(data.get("center_x"), 0.5),
+        center_y=_float(data.get("center_y"), 0.5),
+        start=_float(data.get("start"), 0.0),
+        end=_float(data.get("end"), 1.0),
+        curve=_float(data.get("curve"), 1.0),
+        min_alpha=_float(data.get("min_alpha"), 0.0),
+        max_alpha=_float(data.get("max_alpha"), 1.0),
+        per_element=bool(data.get("per_element")),
+        dissolve=_float(data.get("dissolve"), 0.0),
+        seed=int(_float(data.get("seed"), 0.0)),
+        layers=int(_float(data.get("layers"), 0.0)),
+        halftone_mm=_float(data.get("halftone_mm"), 0.0),
+        halftone_angle=_float(data.get("halftone_angle"), 45.0),
+        carrier=str(data.get("carrier") or "alpha"),
+        invert=bool(data.get("invert")),
+        cutoff=_float(data.get("cutoff"), 0.0),
+    )
+
+
+def build_layer(data: dict[str, Any], tolerance: float) -> LayerSpec:
+    """One overlay's own settings.
+
+    Anything the entry leaves out falls to the same default a single-overlay
+    job would have used, so a caller can send ``{"keep": "the leaves"}`` and
+    change only that.
+    """
+    return LayerSpec(
+        keep=str(data.get("keep") or ""),
+        edge_feather=_float(data.get("edge_feather"), 0.0),
+        opacity=_float(data.get("opacity"), 1.0),
+        blend=str(data.get("blend") or "normal"),
+        placement=build_placement(data.get("placement") or {}),
+        color=build_color(data.get("color") or {}, tolerance),
+        fade=build_fade(data.get("fade") or {}),
+    )
+
+
 def build_spec(payload: dict[str, Any]) -> ComposeSpec:
     placement_data = payload.get("placement") or {}
     color_data = payload.get("color") or {}
     fade_data = payload.get("fade") or {}
     glaze_data = payload.get("glaze") or {}
+    tolerance = _float(payload.get("tolerance"), 1.0)
 
     rect = payload.get("target_rect")
     target_rect = None
@@ -139,32 +215,8 @@ def build_spec(payload: dict[str, Any]) -> ComposeSpec:
         edge_feather=_float(payload.get("edge_feather"), 0.0),
         opacity=_float(payload.get("opacity"), 1.0),
         blend=str(payload.get("blend") or "normal"),
-        placement=Placement(
-            fit=str(placement_data.get("fit") or "auto"),
-            repeat_across=_optional_float(placement_data.get("repeat_across")),
-            repeat_mm=_optional_float(placement_data.get("repeat_mm")),
-            scale=_float(placement_data.get("scale"), 1.0),
-            rotation=_float(placement_data.get("rotation"), 0.0),
-            offset_x=_float(placement_data.get("offset_x"), 0.0),
-            offset_y=_float(placement_data.get("offset_y"), 0.0),
-            mirror=str(placement_data.get("mirror") or "auto"),
-            flip_h=bool(placement_data.get("flip_h")),
-            flip_v=bool(placement_data.get("flip_v")),
-        ),
-        color=ColorSpec(
-            mode=str(color_data.get("mode") or "none"),
-            color=color_data.get("color") or None,
-            color2=color_data.get("color2") or None,
-            from_color=color_data.get("from_color") or None,
-            strength=_float(color_data.get("strength"), 1.0),
-            tolerance=_float(payload.get("tolerance"), 1.0),
-            hue_shift=_float(color_data.get("hue_shift"), 0.0),
-            saturation=_float(color_data.get("saturation"), 1.0),
-            brightness=_float(color_data.get("brightness"), 1.0),
-            contrast=_float(color_data.get("contrast"), 1.0),
-            invert=bool(color_data.get("invert")),
-            black_point=_float(color_data.get("black_point"), 0.0),
-        ),
+        placement=build_placement(placement_data),
+        color=build_color(color_data, tolerance),
         glaze=GlazeSpec(
             enabled=bool(glaze_data.get("enabled")),
             glass=str(glaze_data.get("glass") or "#ffffff"),
@@ -173,27 +225,11 @@ def build_spec(payload: dict[str, Any]) -> ComposeSpec:
             max_per_ink=int(_float(glaze_data.get("max_per_ink"), 3.0)),
             max_total=int(_float(glaze_data.get("max_total"), 5.0)),
         ),
-        fade=Fade(
-            mode=str(fade_data.get("mode") or "none"),
-            what=str(fade_data.get("what") or ""),
-            angle=_float(fade_data.get("angle"), 90.0),
-            center_x=_float(fade_data.get("center_x"), 0.5),
-            center_y=_float(fade_data.get("center_y"), 0.5),
-            start=_float(fade_data.get("start"), 0.0),
-            end=_float(fade_data.get("end"), 1.0),
-            curve=_float(fade_data.get("curve"), 1.0),
-            min_alpha=_float(fade_data.get("min_alpha"), 0.0),
-            max_alpha=_float(fade_data.get("max_alpha"), 1.0),
-            per_element=bool(fade_data.get("per_element")),
-            dissolve=_float(fade_data.get("dissolve"), 0.0),
-            seed=int(_float(fade_data.get("seed"), 0.0)),
-            layers=int(_float(fade_data.get("layers"), 0.0)),
-            halftone_mm=_float(fade_data.get("halftone_mm"), 0.0),
-            halftone_angle=_float(fade_data.get("halftone_angle"), 45.0),
-            carrier=str(fade_data.get("carrier") or "alpha"),
-            invert=bool(fade_data.get("invert")),
-            cutoff=_float(fade_data.get("cutoff"), 0.0),
-        ),
+        fade=build_fade(fade_data),
+        layers=[
+            build_layer(entry or {}, tolerance)
+            for entry in (payload.get("layers") or [])
+        ],
     )
 
 
@@ -215,8 +251,21 @@ def build_export_spec(payload: dict[str, Any], fallback_name: str) -> ExportSpec
 # -- the session ------------------------------------------------------------
 
 
+#: Overlay slots are ``overlay``, ``overlay2``, ``overlay3`` … The first has no
+#: number because it is the only one most jobs use, and renaming it would break
+#: every saved preset and every existing caller.
+_OVERLAY_ROLE = re.compile(r"^overlay([2-9]|[1-9]\d+)?$")
+
+MAX_OVERLAYS = 8
+
+
+def overlay_role(index: int) -> str:
+    """The role name for the nth overlay, counting from zero."""
+    return "overlay" if index == 0 else f"overlay{index + 1}"
+
+
 class Bridge:
-    """One working set: a base image, an overlay, and the settings on top."""
+    """One working set: a base image, its overlays, and the settings on top."""
 
     def __init__(self) -> None:
         self.images: dict[str, Raster] = {}
@@ -228,8 +277,8 @@ class Bridge:
     # -- input ---------------------------------------------------------
 
     def load_image(self, role: str, data: bytes, filename: str = "") -> dict[str, Any]:
-        if role not in {"base", "overlay"}:
-            raise BridgeError("role must be 'base' or 'overlay'")
+        if role != "base" and not _OVERLAY_ROLE.match(role):
+            raise BridgeError("role must be 'base', 'overlay', or 'overlay2' and up")
         if len(data) > MAX_UPLOAD_BYTES:
             raise BridgeError("File is larger than 200 MB.", status=413)
 
@@ -244,25 +293,62 @@ class Bridge:
         self.images[role] = raster
         return {"role": role, "image": describe(raster)}
 
-    def _pair(self) -> tuple[Raster, Raster]:
-        base = self.images.get("base")
-        overlay = self.images.get("overlay")
-        if base is None or overlay is None:
-            raise BridgeError("Load both a base image and an overlay first.")
-        return base, overlay
+    def drop_image(self, role: str) -> dict[str, Any]:
+        """Forget one loaded image. Removing an overlay closes the gap.
 
-    def _compose(self, payload: dict[str, Any], base: Raster, overlay: Raster) -> ComposeResult:
+        Slot numbers are positions in a stack, not names: if you drop the second
+        of three, the third becomes the second. Leaving a hole would make the
+        ``layers`` list line up against nothing.
+        """
+        if role == "base":
+            self.images.pop("base", None)
+            return {"role": role, "overlays": self.overlay_names()}
+        if not _OVERLAY_ROLE.match(role):
+            raise BridgeError("role must be 'base', 'overlay', or 'overlay2' and up")
+
+        kept = [
+            raster
+            for name, raster in self._overlay_items()
+            if name != role
+        ]
+        for name, _ in self._overlay_items():
+            self.images.pop(name, None)
+        for index, raster in enumerate(kept):
+            self.images[overlay_role(index)] = raster
+        return {"role": role, "overlays": self.overlay_names()}
+
+    def _overlay_items(self) -> list[tuple[str, Raster]]:
+        """Loaded overlays in slot order, gaps skipped."""
+        found = [name for name in self.images if _OVERLAY_ROLE.match(name)]
+        found.sort(key=lambda name: int(name[len("overlay"):] or 1))
+        return [(name, self.images[name]) for name in found]
+
+    def overlay_names(self) -> list[str]:
+        return [name for name, _ in self._overlay_items()]
+
+    def _pair(self) -> tuple[Raster, list[Raster]]:
+        base = self.images.get("base")
+        overlays = [raster for _, raster in self._overlay_items()]
+        if base is None or not overlays:
+            raise BridgeError("Load both a base image and an overlay first.")
+        return base, overlays
+
+    def _compose(
+        self, payload: dict[str, Any], base: Raster, overlays: list[Raster]
+    ) -> ComposeResult:
         backends = Backends(allow_models=not payload.get("offline_only"))
-        return compose(base, overlay, build_spec(payload), backends)
+        return compose(base, overlays, build_spec(payload), backends)
 
     # -- output --------------------------------------------------------
 
     def preview(self, payload: dict[str, Any]) -> dict[str, Any]:
-        base, overlay = self._pair()
+        base, overlays = self._pair()
         max_side = int(payload.get("preview_size") or PREVIEW_MAX_SIDE)
 
         preview_base = preview_copy(base, max_side)
-        result = self._compose(payload, preview_base, preview_copy(overlay, max_side))
+        result = self._compose(
+            payload, preview_base, [preview_copy(art, max_side) for art in overlays]
+        )
 
         images = {
             "composite": data_url(result.composite),
@@ -435,8 +521,8 @@ class Bridge:
 
     def render_export(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Encode every requested file. The caller decides where they go."""
-        base, overlay = self._pair()
-        result = self._compose(payload, base, overlay)
+        base, overlays = self._pair()
+        result = self._compose(payload, base, overlays)
         try:
             spec = build_export_spec(payload, base.name or "glassprint").validated()
             files = render(result, spec)
@@ -523,6 +609,8 @@ def handle(method: str, payload_json: str = "{}") -> str:
                 base64.b64decode(payload.get("data") or ""),
                 str(payload.get("filename") or ""),
             )
+        elif method == "drop":
+            result = _BRIDGE.drop_image(str(payload.get("role") or ""))
         elif method == "preview":
             result = _BRIDGE.preview(payload)
         elif method == "chart":

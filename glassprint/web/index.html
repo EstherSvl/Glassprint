@@ -46,6 +46,12 @@
           </div>
         </label>
       </div>
+      <div id="extra-overlays"></div>
+      <button type="button" class="ghost" id="add-overlay">+ another overlay</button>
+      <p class="hint">
+        Overlays stack in order, the last one on top. Everything in step 3 and below
+        is shared — each overlay keeps its own cut-out, opacity and blend.
+      </p>
     </section>
 
     <section class="card">
@@ -382,6 +388,7 @@
           <span class="chips" id="targets">
             <label><input type="checkbox" value="composite" checked /><span>Base + overlay</span></label>
             <label><input type="checkbox" value="overlay" checked /><span>Overlay only</span></label>
+            <label><input type="checkbox" value="overlays" /><span>Each overlay separately</span></label>
             <label><input type="checkbox" value="shape-mask" /><span>Shape mask</span></label>
             <label><input type="checkbox" value="cutout-mask" /><span>Cut-out mask</span></label>
             <label><input type="checkbox" value="layer-map" /><span>Layer map</span></label>

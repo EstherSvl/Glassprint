@@ -80,6 +80,16 @@ main {
 .drop-inner { display: flex; flex-direction: column; gap: 8px; }
 .drop-label strong { display: block; font-size: 13px; }
 .drop-label span { font-size: 11px; color: var(--muted); }
+
+/* Each overlay past the first: its own drop zone with the two settings that
+   genuinely differ between motifs sitting directly under it, so it reads as one
+   thing rather than as a picture and some unrelated sliders. */
+.overlay-slot {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line);
+}
+.overlay-slot .drop { grid-column: 1 / -1; }
+#add-overlay { margin-top: 10px; }
 .thumb {
   width: 100%; height: 76px; object-fit: contain; border-radius: 6px;
   background: repeating-conic-gradient(#2b2f36 0% 25%, #23262c 0% 50%) 50% / 14px 14px;

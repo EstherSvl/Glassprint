@@ -297,3 +297,70 @@ def test_opaque_glass_still_takes_its_colour_from_the_glass():
     white_green = _call("colour", {"wanted": "#1e6b4a", "glass": "#2ea76f"})["ok"]
     white_amber = _call("colour", {"wanted": "#1e6b4a", "glass": "#c4852c"})["ok"]
     assert white_green["ask_for"] == white_amber["ask_for"]
+
+
+# --- more than one overlay --------------------------------------------------
+
+
+def test_a_second_overlay_loads_into_its_own_slot(base_shape, pattern_art, motif_art):
+    _load(base_shape, pattern_art)
+    _call("upload", {"role": "overlay2", "filename": "motif.png", "data": _b64(motif_art)})
+    assert bridge._BRIDGE.overlay_names() == ["overlay", "overlay2"]
+
+    summary = _call("preview", {})["ok"]["summary"]
+    assert len(summary["layers"]) == 2
+
+
+def test_slots_are_positions_so_dropping_one_closes_the_gap(
+    base_shape, pattern_art, motif_art
+):
+    """Drop the middle of three and the third becomes the second.
+
+    Leaving a hole would let the per-layer settings line up against the wrong
+    artwork, which shows up as the wrong motif quietly going faint.
+    """
+    _load(base_shape, pattern_art)
+    _call("upload", {"role": "overlay2", "filename": "a.png", "data": _b64(motif_art)})
+    _call("upload", {"role": "overlay3", "filename": "b.png", "data": _b64(pattern_art)})
+
+    third = bridge._BRIDGE.images["overlay3"]
+    _call("drop", {"role": "overlay2"})
+
+    assert bridge._BRIDGE.overlay_names() == ["overlay", "overlay2"]
+    assert bridge._BRIDGE.images["overlay2"] is third
+
+
+def test_a_nonsense_role_is_refused(base_shape):
+    bridge._BRIDGE = bridge.Bridge()
+    payload = _call(
+        "upload", {"role": "overlay-ish", "filename": "x.png", "data": _b64(base_shape)}
+    )
+    assert "role must be" in payload["error"]
+
+
+def test_per_layer_settings_survive_the_json_crossing():
+    spec = bridge.build_spec(
+        {
+            "keep": "everything",
+            "layers": [
+                {"keep": "the flowers", "opacity": 1.0},
+                {"keep": "the leaves", "opacity": 0.3, "blend": "multiply"},
+            ],
+        }
+    )
+    assert [layer.keep for layer in spec.layers] == ["the flowers", "the leaves"]
+    assert spec.layers[1].opacity == 0.3
+    assert spec.layers[1].blend == "multiply"
+    # A payload that never mentions layers still behaves as one overlay.
+    assert bridge.build_spec({"keep": "everything"}).layers == []
+
+
+def test_each_overlay_can_be_exported_on_its_own(base_shape, pattern_art, motif_art):
+    _load(base_shape, pattern_art)
+    _call("upload", {"role": "overlay2", "filename": "motif.png", "data": _b64(motif_art)})
+
+    files = _call("export", {"export": {"formats": ["png"], "targets": ["overlays"]}})["ok"]
+    names = [entry["file"] for entry in files["files"]]
+    assert len(names) == 2
+    assert any("overlay-1" in name for name in names)
+    assert any("overlay-2" in name for name in names)

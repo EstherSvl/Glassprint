@@ -27,7 +27,7 @@ from .raster import (
 )
 
 TARGETS = (
-    "composite", "overlay", "shape-mask", "cutout-mask",
+    "composite", "overlay", "overlays", "shape-mask", "cutout-mask",
     "layer-map", "layers", "glaze-layers", "print-order",
 )
 
@@ -157,6 +157,8 @@ def _collect_layers(result: ComposeResult, targets: list[str]) -> dict[str, Rast
             layers["composite"] = result.composite
         elif target == "overlay":
             layers["overlay"] = result.overlay_layer
+        elif target == "overlays":
+            layers.update(_overlay_layers(result))
         elif target == "shape-mask":
             layers["shape-mask"] = _mask_to_raster(result.shape_mask, result.composite)
         elif target == "cutout-mask":
@@ -168,6 +170,21 @@ def _collect_layers(result: ComposeResult, targets: list[str]) -> dict[str, Rast
         elif target == "glaze-layers":
             layers.update(_glaze_layers(result))
     return layers
+
+
+def _overlay_layers(result: ComposeResult) -> dict[str, Raster]:
+    """Each piece of artwork on its own, in the order it was composited.
+
+    ``overlay`` flattens the stack into the one file you hand the printer.
+    This is for when you are not printing it in one go: a separate pass per
+    motif, or a motif that goes on a different part of the object.
+    """
+    out: dict[str, Raster] = {}
+    for index, layer in enumerate(result.layers, start=1):
+        out[f"overlay-{index}"] = Raster(
+            layer.rgba, dpi=result.base.dpi, name=layer.name or f"overlay-{index}"
+        )
+    return out
 
 
 def _glaze_layers(result: ComposeResult) -> dict[str, Raster]:

@@ -4,6 +4,9 @@ import numpy as np
 import pytest
 
 from glassprint import colors, masks, nl, pattern, recolor, segment
+from glassprint.compose import ComposeSpec, LayerSpec, compose
+from glassprint.fade import Fade
+from glassprint.pattern import Placement
 from glassprint.raster import Raster, mm_to_px, px_to_mm
 
 
@@ -349,3 +352,85 @@ def test_a_tablet_is_not_told_to_pip_install():
         assert "pip install" in desktop.notes[0]
     finally:
         segment.IN_BROWSER = was
+
+
+# --- more than one overlay --------------------------------------------------
+
+
+def test_one_overlay_still_arrives_as_one_overlay(base_shape, motif_art):
+    """A single Raster and a one-item list must give the same picture.
+
+    The whole per-layer refactor is only safe if this holds: every existing
+    caller passes one raster and none of them asked for anything to change.
+    """
+    spec = ComposeSpec(keep="remove the white background", opacity=0.6, blend="multiply")
+    alone = compose(base_shape, motif_art, spec)
+    listed = compose(base_shape, [motif_art], spec)
+
+    assert np.array_equal(alone.composite.rgba, listed.composite.rgba)
+    assert np.array_equal(alone.overlay_layer.rgba, listed.overlay_layer.rgba)
+    assert len(alone.layers) == 1
+
+
+def test_a_second_overlay_adds_ink_rather_than_replacing_it(base_shape, motif_art, pattern_art):
+    spec = ComposeSpec(keep="remove the white background")
+    one = compose(base_shape, motif_art, spec)
+    two = compose(base_shape, [motif_art, pattern_art], spec)
+
+    assert len(two.layers) == 2
+    # The stack is the union, so it can only ever cover more than one motif did.
+    assert two.overlay_layer.alpha_f.sum() > one.overlay_layer.alpha_f.sum()
+
+
+def test_each_overlay_keeps_its_own_settings(base_shape, motif_art):
+    """Two copies of the same artwork, told to behave differently, must."""
+    result = compose(
+        base_shape,
+        [motif_art, motif_art],
+        ComposeSpec(
+            layers=[
+                LayerSpec(keep="remove the white background", opacity=1.0),
+                LayerSpec(
+                    keep="remove the white background",
+                    opacity=0.25,
+                    placement=Placement(offset_x=0.4),
+                ),
+            ]
+        ),
+    )
+    first, second = result.layers
+    # Same artwork, same cut-out, but the second is quarter strength and moved,
+    # so it cannot be laying down the same ink in the same place.
+    assert not np.array_equal(first.rgba, second.rgba)
+    assert second.rgba[:, :, 3].max() < first.rgba[:, :, 3].max()
+
+
+def test_layers_fall_back_to_the_shared_settings(base_shape, motif_art):
+    """Two overlays and no per-layer list means both use the top-level fields."""
+    spec = ComposeSpec(keep="remove the white background", opacity=0.5).validated()
+    assert spec.for_layer(0) == spec.for_layer(1)
+    assert spec.for_layer(5).opacity == 0.5
+
+    result = compose(base_shape, [motif_art, motif_art], spec)
+    assert np.array_equal(result.layers[0].rgba, result.layers[1].rgba)
+
+
+def test_composing_nothing_is_an_error(base_shape):
+    with pytest.raises(ValueError, match="at least one overlay"):
+        compose(base_shape, [])
+
+
+def test_two_stacked_fades_say_which_one_won(base_shape, motif_art):
+    """The pass count cannot follow two overlays at once, so it says so."""
+    stacked = Fade(mode="linear", layers=4)
+    result = compose(
+        base_shape,
+        [motif_art, motif_art],
+        ComposeSpec(
+            layers=[
+                LayerSpec(keep="remove the white background", fade=stacked),
+                LayerSpec(keep="remove the white background", fade=stacked),
+            ]
+        ),
+    )
+    assert any("pass count follows the first" in note for note in result.notes)

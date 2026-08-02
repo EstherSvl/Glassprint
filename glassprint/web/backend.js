@@ -32,6 +32,10 @@ const HttpBackend = {
     return data;
   },
 
+  async drop(role, sessionId) {
+    return this.call("drop", { role, session_id: sessionId });
+  },
+
   async preview(spec, signal) {
     const response = await fetch("/api/preview", {
       method: "POST",
@@ -158,6 +162,10 @@ const PyodideBackend = {
       filename: file.name,
       data: bytesToBase64(new Uint8Array(buffer)),
     });
+  },
+
+  async drop(role) {
+    return this.call("drop", { role });
   },
 
   async preview(spec, signal) {

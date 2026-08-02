@@ -6,6 +6,7 @@ and a standalone overlay layer, out.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace as dataclass_replace
 
 import numpy as np
@@ -38,6 +39,32 @@ class GlazeSpec:
 
 
 @dataclass
+class LayerSpec:
+    """Everything that can differ between one overlay and the next.
+
+    Split out when the tool learned to take more than one piece of artwork.
+    The rest of :class:`ComposeSpec` — which part of the base to fill, whether
+    to clip, the glaze — is a property of the *panel* and stays shared, because
+    two motifs on one plate are still one print.
+    """
+
+    keep: str = ""
+    edge_feather: float = 0.0
+    opacity: float = 1.0
+    blend: str = "normal"
+    placement: Placement = field(default_factory=Placement)
+    color: ColorSpec = field(default_factory=ColorSpec)
+    fade: Fade = field(default_factory=Fade)
+
+    def validated(self) -> "LayerSpec":
+        if self.blend not in BLEND_MODES:
+            raise ValueError(f"unknown blend mode {self.blend!r}; choose from {', '.join(BLEND_MODES)}")
+        return dataclass_replace(
+            self, placement=self.placement.normalised(), fade=self.fade.validated()
+        )
+
+
+@dataclass
 class ComposeSpec:
     # What of the overlay to keep.
     keep: str = ""
@@ -62,13 +89,38 @@ class ComposeSpec:
     fade: Fade = field(default_factory=Fade)
     glaze: GlazeSpec = field(default_factory=lambda: GlazeSpec())
 
+    #: Per-overlay settings. Empty means every overlay uses the fields above,
+    #: which is what a single-overlay caller has always got.
+    layers: list[LayerSpec] = field(default_factory=list)
+
     def validated(self) -> "ComposeSpec":
         if self.target not in TARGET_MODES:
             raise ValueError(f"unknown target mode {self.target!r}; choose from {', '.join(TARGET_MODES)}")
         if self.blend not in BLEND_MODES:
             raise ValueError(f"unknown blend mode {self.blend!r}; choose from {', '.join(BLEND_MODES)}")
         return dataclass_replace(
-            self, placement=self.placement.normalised(), fade=self.fade.validated()
+            self,
+            placement=self.placement.normalised(),
+            fade=self.fade.validated(),
+            layers=[layer.validated() for layer in self.layers],
+        )
+
+    def for_layer(self, index: int) -> LayerSpec:
+        """Settings for one overlay, falling back to the shared ones.
+
+        A caller that never asked for more than one overlay gets exactly the
+        behaviour it always had: the top-level fields, unchanged.
+        """
+        if index < len(self.layers):
+            return self.layers[index]
+        return LayerSpec(
+            keep=self.keep,
+            edge_feather=self.edge_feather,
+            opacity=self.opacity,
+            blend=self.blend,
+            placement=self.placement,
+            color=self.color,
+            fade=self.fade,
         )
 
 
@@ -93,6 +145,8 @@ class ComposeResult:
     fade_field: np.ndarray | None = None
     #: Per-colour glaze recipes, when glazing is on.
     glaze_plan: "GlazePlan | None" = None
+    #: One entry per overlay, in the order they were composited.
+    layers: list["LayerResult"] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
     def faintest_alpha(self) -> float:
@@ -142,6 +196,20 @@ class ComposeResult:
                 "faintest_alpha": self.faintest_alpha(),
             },
             "glaze": self.glaze_plan.as_dict() if self.glaze_plan else None,
+            # One entry per piece of artwork. The fields above describe the
+            # first, because that is what a single-overlay caller has always
+            # read them as; this is where the rest of the stack shows up.
+            "layers": [
+                {
+                    "name": layer.name,
+                    "plan": layer.plan.describe(),
+                    "plan_source": layer.plan.source,
+                    "blend": layer.blend,
+                    "is_pattern": layer.info.is_pattern,
+                    "coverage": round(masks.coverage(layer.cutout), 4),
+                }
+                for layer in self.layers
+            ],
             "notes": self.notes,
         }
 
@@ -211,33 +279,45 @@ def resolve_shape(
     return mask, notes
 
 
-def compose(
+@dataclass
+class LayerResult:
+    """One overlay, cut out, placed, faded and ready to blend."""
+
+    rgba: np.ndarray               # placed artwork, alpha already faded/clipped
+    cutout: np.ndarray
+    plan: MaskPlan
+    info: PatternInfo
+    coverage: np.ndarray
+    faintest: float
+    blend: str
+    fade: Fade
+    layer_map: np.ndarray | None = None
+    fade_field: np.ndarray | None = None
+    elements: int = 0
+    name: str = ""
+
+
+def _build_layer(
     base: Raster,
     overlay: Raster,
-    spec: ComposeSpec | None = None,
-    backends: Backends | None = None,
-) -> ComposeResult:
-    spec = (spec or ComposeSpec()).validated()
-    backends = backends or Backends()
-    notes: list[str] = []
+    layer: LayerSpec,
+    spec: ComposeSpec,
+    shaped: np.ndarray,
+    box: Box,
+    backends: Backends,
+    notes: list[str],
+) -> LayerResult:
+    """Everything that happens to one piece of artwork, start to finish.
 
-    # 1. Which part of the base are we filling?
-    shape_mask, shape_notes = resolve_shape(base, spec, backends)
-    notes.extend(shape_notes)
-
-    shaped = shape_mask
-    if spec.shape_grow:
-        shaped = masks.grow(shaped, spec.shape_grow)
-    if spec.shape_feather:
-        shaped = masks.feather(shaped, spec.shape_feather)
-
-    box = masks.bbox(shaped, threshold=0.35) or (0, 0, base.width, base.height)
-
+    Lifted out of ``compose`` unchanged when the tool learned to take several
+    overlays. The shape on the base is resolved once and handed in; this runs
+    per overlay.
+    """
     # 2. Which part of the overlay are we using?
-    plan = nl.build_plan(spec.keep, overlay, use_claude=spec.use_claude, tolerance=spec.tolerance)
+    plan = nl.build_plan(layer.keep, overlay, use_claude=spec.use_claude, tolerance=spec.tolerance)
     cutout = segment.evaluate(plan, overlay, backends)
-    if spec.edge_feather:
-        cutout = masks.feather(cutout, spec.edge_feather)
+    if layer.edge_feather:
+        cutout = masks.feather(cutout, layer.edge_feather)
 
     # 3. Read the artwork's language and place it.
     info = pattern.analyse(
@@ -247,13 +327,13 @@ def compose(
         target_dpi=base.effective_dpi[0],
     )
     art = pattern.apply_cutout(overlay, cutout)
-    art = recolor.apply(art, spec.color)
+    art = recolor.apply(art, layer.color)
 
     placed = pattern.place(
         art,
         base.size,
         box,
-        spec.placement,
+        layer.placement,
         info,
         target_dpi=base.effective_dpi[0],
     )
@@ -264,31 +344,31 @@ def compose(
     layer_map: np.ndarray | None = None
     fade_field: np.ndarray | None = None
 
-    if spec.fade.active:
+    if layer.fade.active:
         opacity_field = fade_module.ramp(
-            spec.fade, (base.height, base.width), box, shaped
+            layer.fade, (base.height, base.width), box, shaped
         )
-        if spec.fade.stacked:
-            opacity_field, layer_map, stack_notes = _stack(opacity_field, spec)
+        if layer.fade.stacked:
+            opacity_field, layer_map, stack_notes = _stack(opacity_field, layer.fade)
             notes.extend(stack_notes)
-        elif spec.fade.screened:
-            opacity_field, screen_notes = _screen(opacity_field, base, spec)
+        elif layer.fade.screened:
+            opacity_field, screen_notes = _screen(opacity_field, base, layer.fade)
             notes.extend(screen_notes)
-        notes.extend(fade_check(spec.fade, pattern=info.is_pattern))
-        scope, scope_note = _fade_scope(overlay, cutout, base, box, spec, info, backends)
+        notes.extend(fade_check(layer.fade, pattern=info.is_pattern))
+        scope, scope_note = _fade_scope(overlay, cutout, base, box, spec, layer, info, backends)
         if scope_note:
             notes.append(scope_note)
         # A dot screen is its own way of expressing the ramp, so the
         # element-level ones stand down rather than averaging the dots away.
         element_spec = (
-            dataclass_replace(spec.fade, per_element=False, dissolve=0.0)
-            if (spec.fade.screened or spec.fade.stacked)
-            else spec.fade
+            dataclass_replace(layer.fade, per_element=False, dissolve=0.0)
+            if (layer.fade.screened or layer.fade.stacked)
+            else layer.fade
         )
         layer_alpha, faded_elements = fade_module.apply(
             layer_alpha, opacity_field, element_spec, scope
         )
-        if spec.fade.carrier == "ink":
+        if layer.fade.carrier == "ink":
             # The ramp goes into the colour rather than the alpha, because on
             # glass with no white pass alpha is thresholded and the tail never
             # prints. Same ramp, resolved once and used for both.
@@ -306,13 +386,107 @@ def compose(
     if spec.clip_to_shape:
         layer_alpha = layer_alpha * shaped
         coverage = coverage * shaped
-    layer_alpha = layer_alpha * float(np.clip(spec.opacity, 0.0, 1.0))
-    coverage = coverage * float(np.clip(spec.opacity, 0.0, 1.0))
-    layer_alpha = fade_module.apply_cutoff(layer_alpha, spec.fade.cutoff)
+    layer_alpha = layer_alpha * float(np.clip(layer.opacity, 0.0, 1.0))
+    coverage = coverage * float(np.clip(layer.opacity, 0.0, 1.0))
+    layer_alpha = fade_module.apply_cutoff(layer_alpha, layer.fade.cutoff)
 
     overlay_layer = placed.copy()
     overlay_layer[:, :, 3] = np.clip(layer_alpha * 255.0 + 0.5, 0, 255).astype(np.uint8)
     faintest = _faintest_ink(placed, layer_alpha, shaped if spec.clip_to_shape else None)
+
+    return LayerResult(
+        rgba=overlay_layer,
+        cutout=cutout,
+        plan=plan,
+        info=info,
+        coverage=coverage,
+        faintest=faintest,
+        blend=layer.blend,
+        fade=layer.fade,
+        layer_map=layer_map,
+        fade_field=fade_field,
+        elements=faded_elements,
+        name=overlay.name or "overlay",
+    )
+
+
+def compose(
+    base: Raster,
+    overlay: "Raster | Sequence[Raster]",
+    spec: ComposeSpec | None = None,
+    backends: Backends | None = None,
+) -> ComposeResult:
+    """Put one or more pieces of artwork onto a base image.
+
+    ``overlay`` takes a single raster or several. Several are composited in
+    order, each with its own entry in ``spec.layers`` — or, if that is empty,
+    all sharing the top-level settings.
+    """
+    overlays = [overlay] if isinstance(overlay, Raster) else list(overlay)
+    if not overlays:
+        raise ValueError("compose needs at least one overlay")
+    spec = (spec or ComposeSpec()).validated()
+    backends = backends or Backends()
+    notes: list[str] = []
+
+    # 1. Which part of the base are we filling?
+    shape_mask, shape_notes = resolve_shape(base, spec, backends)
+    notes.extend(shape_notes)
+
+    shaped = shape_mask
+    if spec.shape_grow:
+        shaped = masks.grow(shaped, spec.shape_grow)
+    if spec.shape_feather:
+        shaped = masks.feather(shaped, spec.shape_feather)
+
+    box = masks.bbox(shaped, threshold=0.35) or (0, 0, base.width, base.height)
+
+    # 2-4. Each overlay in turn: cut out, place, colour, fade. The panel-level
+    # decisions above are shared; everything below the shape is per artwork.
+    layers = [
+        _build_layer(base, art, spec.for_layer(index), spec, shaped, box, backends, notes)
+        for index, art in enumerate(overlays)
+    ]
+
+    # The overlay-only export is the whole stack, alpha-over in order, so the
+    # file you hand the printer carries every motif. The composite blends each
+    # layer onto the base with *its own* mode, which is not the same operation:
+    # multiply against the panel is not multiply against the motif beneath.
+    # The stack starts *as* the first layer rather than as an empty canvas.
+    # Compositing onto transparency looks like a no-op and is not: it divides
+    # the colour back out by an alpha of zero, so every pixel the artwork does
+    # not cover comes back black. The glaze solver reads those colours, and a
+    # dot screen leaves holes all through a region it still has to find a
+    # recipe for.
+    stack = layers[0].rgba
+    composite = base.rgba
+    for layer in layers:
+        if layer is not layers[0]:
+            stack = _blend_over(stack, layer.rgba, "normal")
+        composite = _blend_over(composite, layer.rgba, layer.blend)
+
+    overlay_layer = stack
+    first = layers[0]
+    cutout, plan, info = first.cutout, first.plan, first.info
+    faded_elements = sum(layer.elements for layer in layers)
+    faintest = min((layer.faintest for layer in layers if layer.faintest > 0), default=0.0)
+
+    # One pass lays down every layer, so coverage is the union.
+    coverage = layers[0].coverage
+    for layer in layers[1:]:
+        coverage = np.maximum(coverage, layer.coverage)
+
+    # A stacked fade counts printed passes, and two overlays each asking for a
+    # different number of them is a question this cannot answer. The first
+    # layer's map is used and the ambiguity is said out loud rather than
+    # averaged into something that looks decided.
+    layer_map = first.layer_map
+    fade_field = first.fade_field
+    if len(layers) > 1 and any(layer.layer_map is not None for layer in layers[1:]):
+        notes.append(
+            "More than one overlay is using a stacked fade. The pass count follows the "
+            "first; the others print as a single pass each."
+        )
 
     plan_ = None
     if spec.glaze.enabled:
@@ -326,7 +500,12 @@ def compose(
             max_per_ink=spec.glaze.max_per_ink,
             max_total=spec.glaze.max_total,
         )
-        if spec.fade.active and not (spec.fade.screened or spec.fade.stacked or spec.fade.dissolve > 0):
+        smooth = [
+            each.fade for each in layers
+            if each.fade.active
+            and not (each.fade.screened or each.fade.stacked or each.fade.dissolve > 0)
+        ]
+        if smooth:
             notes.append(
                 "A smooth fade eats the glaze stack itself, so the correction unwinds as it "
                 "thins and the colour reverts toward the bare glass — with only a few passes "
@@ -338,26 +517,26 @@ def compose(
             if recipe.note:
                 notes.append(f"Glaze — {to_hex(recipe.target)}: {recipe.note}")
 
-    # 5. Blend over the base.
-    composite = _blend_over(base.rgba, overlay_layer, spec.blend)
 
+    # 5. Already blended above, one layer at a time.
     notes.extend(backends.notes)
     return ComposeResult(
         composite=Raster(composite, dpi=base.dpi, source_format=base.source_format, name=base.name),
-        overlay_layer=Raster(overlay_layer, dpi=base.dpi, name=(overlay.name or "overlay")),
+        overlay_layer=Raster(overlay_layer, dpi=base.dpi, name=first.name),
         base=base,
         shape_mask=shaped,
         cutout_mask=cutout,
         plan=plan,
         info=info,
         box=box,
-        fade=spec.fade,
+        fade=first.fade,
         fade_elements=faded_elements,
         faintest_ink=faintest,
         layer_map=layer_map,
         coverage=coverage,
         fade_field=fade_field,
         glaze_plan=plan_,
+        layers=layers,
         notes=notes,
     )
 
@@ -393,40 +572,40 @@ def _faintest_ink(
 
 
 def _stack(
-    opacity_field: np.ndarray, spec: ComposeSpec
+    opacity_field: np.ndarray, fade: Fade
 ) -> tuple[np.ndarray, np.ndarray, list[str]]:
     """Step the ramp into printed ink layers."""
     notes: list[str] = []
-    if spec.fade.screened or spec.fade.per_element or spec.fade.dissolve > 0:
+    if fade.screened or fade.per_element or fade.dissolve > 0:
         notes.append(
             "Ink layers, the dot screen and dissolve are three ways of expressing the "
             "same fade, so the layers were used and the others left off."
         )
-    stepped, layer_map = fade_module.quantise(opacity_field, spec.fade.layers)
+    stepped, layer_map = fade_module.quantise(opacity_field, fade.layers)
     return stepped, layer_map, notes
 
 
 def _screen(
-    opacity_field: np.ndarray, base: Raster, spec: ComposeSpec
+    opacity_field: np.ndarray, base: Raster, fade: Fade
 ) -> tuple[np.ndarray, list[str]]:
     """Turn the ramp into a dot screen, warning if the pitch is too fine."""
     notes: list[str] = []
     dpi = base.effective_dpi[0]
-    pitch_px = spec.fade.halftone_mm / MM_PER_INCH * dpi
+    pitch_px = fade.halftone_mm / MM_PER_INCH * dpi
 
-    if spec.fade.halftone_mm < 0.8:
+    if fade.halftone_mm < 0.8:
         notes.append(
-            f"A {spec.fade.halftone_mm:g}mm dot screen is fine enough to beat against the "
+            f"A {fade.halftone_mm:g}mm dot screen is fine enough to beat against the "
             "printer's own halftone and moiré. Coarse dots read as a deliberate "
             "texture — 1mm and up is the safe range."
         )
-    if spec.fade.per_element or spec.fade.dissolve > 0:
+    if fade.per_element or fade.dissolve > 0:
         notes.append(
             "The dot screen and the per-element controls are two ways of expressing the "
             "same fade, so the screen was used and dissolve left off."
         )
 
-    screened = fade_module.halftone(opacity_field, pitch_px, spec.fade.halftone_angle)
+    screened = fade_module.halftone(opacity_field, pitch_px, fade.halftone_angle)
     return screened, notes
 
 
@@ -436,6 +615,7 @@ def _fade_scope(
     base: Raster,
     box: Box,
     spec: ComposeSpec,
+    layer: LayerSpec,
     info: PatternInfo,
     backends: Backends,
 ) -> tuple[np.ndarray | None, str | None]:
@@ -446,7 +626,7 @@ def _fade_scope(
     one colour. The resulting mask is then placed with the same settings as the
     artwork, so it tiles in step with it.
     """
-    what = spec.fade.what.strip()
+    what = layer.fade.what.strip()
     if not what:
         return None, None
 
@@ -461,7 +641,7 @@ def _fade_scope(
     carrier = np.zeros((overlay.height, overlay.width, 4), dtype=np.uint8)
     carrier[:, :, 3] = np.clip(scope_mask * 255.0 + 0.5, 0, 255).astype(np.uint8)
     placed = pattern.place(
-        carrier, base.size, box, spec.placement, info, target_dpi=base.effective_dpi[0]
+        carrier, base.size, box, layer.placement, info, target_dpi=base.effective_dpi[0]
     )
     return placed[:, :, 3].astype(np.float32) / 255.0, None
 
