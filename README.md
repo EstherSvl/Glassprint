@@ -157,6 +157,52 @@ Other commands:
 
 ---
 
+## Talking to it
+
+Every setting below is reachable from a sentence. The chat sits at the top of the
+control panel because describing what you want is meant to be the first thing you
+reach for; the sliders under it are the fine adjustment, and the two stay in step
+— say *"tile it four across"* and the fit dropdown and the repeat field both move,
+so the next thing you drag starts from there.
+
+```
+you          keep the dots, drop the white background, tile it four across
+             and fade it downward over five ink layers
+glassprint   Tiling the artwork, 4 repeats across the shape, fading downward,
+             built from 5 printed ink layers and cut-out: keeping the dots;
+             removing background.
+
+you          will this print?
+glassprint   Not all of it. The thinnest ink is at 9% coverage and the E1 prints
+             nothing under about 50% with a white underbase. Raise the far end of
+             the fade, build it from printed ink layers instead of a smooth ramp,
+             or set the cutoff so the tail is dropped deliberately rather than
+             dithered into speckle.
+```
+
+Same thing on the command line:
+
+```bash
+glassprint compose panel.png dots.png \
+  --describe "keep the dots, tile it four across, fade it downward over 3 layers"
+```
+
+It prints back what it read, one line per setting it moved, before it composes.
+
+**This runs offline.** The reader is rules, not a model, because on a tablet the
+browser build has no API key and no server behind it — there, the rules are not a
+fallback, they are the whole thing. With the `claude` extra installed and the
+checkbox ticked, anything the rules cannot untangle goes to Claude, which sees the
+conversation and the current settings and writes the same list of changes.
+
+It says what moved rather than just doing it, and it will not invent an answer:
+*"will this print?"* is answered from the number the pipeline last measured, and
+the questions about glass and white underbase from the test tiles in this README.
+Ask it something there is no measurement behind and it says so.
+
+With more than one overlay, name one and only it changes — *"make the second
+overlay half strength"*, *"the top one should multiply"*.
+
 ## How the instruction is read
 
 Write what you want in plain English. The parser splits on keep/remove verbs and

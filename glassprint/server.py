@@ -91,7 +91,7 @@ def create_app() -> FastAPI:
 
     # Calibration is the same handful of Bridge methods whichever shell is in
     # front of it, so it gets one route rather than four near-identical ones.
-    CALLABLE = {"chart", "calibrate", "load_profile", "colour"}
+    CALLABLE = {"chart", "calibrate", "load_profile", "colour", "talk"}
 
     @app.post("/api/call/{method}")
     def call(method: str, payload: dict[str, Any]) -> JSONResponse:

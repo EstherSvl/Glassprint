@@ -519,6 +519,32 @@ class Bridge:
                 )
         return answer
 
+    # -- talking to it -------------------------------------------------
+
+    def talk(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """One turn of the conversation.
+
+        The settings go over in the payload and come back changed, rather than
+        being held here, because the panel of controls is the same state and it
+        has to stay in step with what was just said. Whoever draws the controls
+        owns them; this only ever hands back a new set.
+        """
+        from . import talk as talk_module
+
+        history = [
+            talk_module.Turn(str(turn.get("role") or "you"), str(turn.get("text") or ""))
+            for turn in (payload.get("history") or [])
+            if isinstance(turn, dict)
+        ]
+        reply = talk_module.respond(
+            str(payload.get("message") or ""),
+            payload.get("spec") or {},
+            history=history,
+            context=payload.get("context") or {},
+            use_claude=bool(payload.get("use_claude")),
+        )
+        return reply.as_dict()
+
     def render_export(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Encode every requested file. The caller decides where they go."""
         base, overlays = self._pair()
@@ -609,6 +635,8 @@ def handle(method: str, payload_json: str = "{}") -> str:
                 base64.b64decode(payload.get("data") or ""),
                 str(payload.get("filename") or ""),
             )
+        elif method == "talk":
+            result = _BRIDGE.talk(payload)
         elif method == "drop":
             result = _BRIDGE.drop_image(str(payload.get("role") or ""))
         elif method == "preview":

@@ -235,3 +235,33 @@ def test_notes_and_warnings_are_styled_apart():
     plain = css[css.index(".readout .note {") : css.index(".readout .note {") + 90]
     assert "var(--accent)" in accent
     assert "var(--accent)" not in plain, "notes must not share the warning colour"
+
+
+def test_every_settable_path_has_a_control_to_land_in():
+    """Saying it must move the slider, not just the spec.
+
+    The conversation and the panel of controls are the same state seen two ways.
+    A path the chat can set but the form cannot show would drift out of sight:
+    the next preview would use it, the next drag of an unrelated slider would
+    silently revert it, and nothing on screen would ever have said so.
+    """
+    from glassprint import talk
+
+    source = (ROOT / "glassprint" / "web" / "app.js").read_text()
+    start = source.index("const SPEC_FIELDS = {")
+    block = source[start : source.index("\n};", start)]
+    mapped = set(re.findall(r'"?([a-z0-9_]+(?:\.[a-z0-9_]+)?)"?:\s*"[a-z0-9-]+"', block))
+    # target and fade.mode are segmented buttons rather than inputs, so they are
+    # set by hand a few lines further down instead of through the map.
+    handled = mapped | {"target", "fade.mode"}
+    missing = sorted(set(talk.SETTABLE) - handled)
+    assert not missing, f"no control for {missing}"
+
+
+def test_the_chat_is_in_the_built_page(built):
+    """It is the first thing in the panel, so it has to survive the inlining."""
+    assert 'id="chat-log"' in built
+    assert 'id="chat-message"' in built
+    assert "sendMessage" in built
+    # The panel is in document order, and the chat card comes before the images.
+    assert built.index('id="chat-card"') < built.index('id="drop-base"')

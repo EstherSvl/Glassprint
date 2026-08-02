@@ -15,6 +15,9 @@ const state = {
   lastPreview: null,
   inFlight: null,
   capabilities: null,
+  /* The conversation so far, as {role, text}. Kept here rather than read back
+   * off the DOM so the history sent with each message is the real one. */
+  chat: [],
   /* Roles of the overlays beyond the first, in stacking order. The first is
    * plain "overlay" and lives in the markup; these are built as you add them. */
   extraOverlays: [],
@@ -347,6 +350,175 @@ function describeImage(role, image) {
   const alpha = image.has_alpha ? "transparent areas" : "no transparency";
   $(`meta-${role}`).textContent =
     `${image.width}×${image.height} px · ${image.size_mm[0]}×${image.size_mm[1]} mm · ${dpi} · ${alpha}`;
+}
+
+/* ------------------------------------------------------------------- chat */
+
+/* Where each settable path lives on the form.
+ *
+ * The conversation and the sliders are the same state seen two ways, so a
+ * sentence has to land in the controls rather than beside them: say "tile it
+ * four across" and the fit dropdown and the repeat field both move, and the
+ * next thing you drag starts from there. Anything not in this map cannot be
+ * reached by talking, which is the point — the chat moves settings, it does not
+ * reach into the pipeline. */
+const SPEC_FIELDS = {
+  keep: "keep",
+  target_describe: "target-describe",
+  clip_to_shape: "clip",
+  edge_feather: "edge-feather",
+  opacity: "opacity",
+  blend: "blend",
+  "placement.fit": "fit",
+  "placement.repeat_across": "repeat-across",
+  "placement.repeat_mm": "repeat-mm",
+  "placement.scale": "scale",
+  "placement.rotation": "rotation",
+  "placement.offset_x": "offset-x",
+  "placement.offset_y": "offset-y",
+  "placement.mirror": "mirror",
+  "placement.flip_h": "flip-h",
+  "placement.flip_v": "flip-v",
+  "color.mode": "color-mode",
+  "color.color": "color-hex",
+  "color.color2": "color2-hex",
+  "color.from_color": "from-color-hex",
+  "color.saturation": "saturation",
+  "color.brightness": "brightness",
+  "color.contrast": "contrast",
+  "color.hue_shift": "hue-shift",
+  "fade.what": "fade-what",
+  "fade.angle": "fade-angle",
+  "fade.start": "fade-start",
+  "fade.end": "fade-end",
+  "fade.curve": "fade-curve",
+  "fade.min_alpha": "fade-min",
+  "fade.dissolve": "fade-dissolve",
+  "fade.layers": "fade-layers",
+  "fade.halftone_mm": "fade-halftone",
+  "fade.cutoff": "fade-cutoff",
+  "fade.per_element": "fade-per-element",
+  "glaze.enabled": "glaze-on",
+  "glaze.glass": "glass-color",
+};
+
+function readPath(object, path) {
+  return path.split(".").reduce((node, key) => (node == null ? node : node[key]), object);
+}
+
+function applySpec(spec) {
+  Object.entries(SPEC_FIELDS).forEach(([path, id]) => {
+    const value = readPath(spec, path);
+    if (value === undefined) return;
+    const el = $(id);
+    if (!el) return;
+    if (el.type === "checkbox") el.checked = Boolean(value);
+    else if (value === null) el.value = "";
+    else el.value = String(value);
+  });
+
+  // The two segmented controls are not inputs, so they are set by hand.
+  if (spec.target) {
+    state.target = spec.target;
+    setSegmented("target-modes", spec.target);
+  }
+  if (spec.fade && spec.fade.mode) {
+    state.fadeMode = spec.fade.mode;
+    setSegmented("fade-modes", spec.fade.mode);
+  }
+  // A change aimed at one overlay lands in spec.layers, whose entries line up
+  // with the filled slots — the first is the main controls above, the rest are
+  // the extra drop zones in order.
+  const filled = state.extraOverlays.filter((role) => state.images[role]);
+  (spec.layers || []).slice(1).forEach((layer, index) => {
+    const role = filled[index];
+    if (!role || !layer) return;
+    if (layer.keep !== undefined) $(`keep-${role}`).value = layer.keep;
+    if (layer.opacity !== undefined) $(`opacity-${role}`).value = String(layer.opacity);
+    if (layer.blend !== undefined) $(`blend-${role}`).value = layer.blend;
+  });
+
+  // Anything with a live "0 px" style label beside it has to be told to redraw.
+  updateLabels();
+}
+
+function setSegmented(containerId, value) {
+  const container = $(containerId);
+  if (!container) return;
+  container.querySelectorAll("button").forEach((button) => {
+    button.classList.toggle("active", button.dataset.value === value);
+  });
+}
+
+function addTurn(role, text, changes) {
+  const turn = document.createElement("div");
+  turn.className = `chat-turn ${role}`;
+  turn.textContent = text;
+  if (changes && changes.length) {
+    const moved = document.createElement("span");
+    moved.className = "moved";
+    moved.innerHTML = changes
+      .map((change) => `<code>${escapeHtml(change.path)}</code>`)
+      .join(" · ");
+    turn.appendChild(moved);
+  }
+  const log = $("chat-log");
+  log.appendChild(turn);
+  log.scrollTop = log.scrollHeight;
+  return turn;
+}
+
+function showSuggestions(list) {
+  const box = $("chat-suggestions");
+  box.replaceChildren();
+  (list || []).forEach((text) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = text;
+    button.addEventListener("click", () => {
+      $("chat-message").value = text;
+      sendMessage();
+    });
+    box.appendChild(button);
+  });
+}
+
+async function sendMessage() {
+  const input = $("chat-message");
+  const message = input.value.trim();
+  if (!message) return;
+
+  input.value = "";
+  showSuggestions([]);
+  state.chat.push({ role: "you", text: message });
+  addTurn("you", message);
+  const waiting = addTurn("glassprint", "reading that…");
+  waiting.classList.add("thinking");
+
+  try {
+    const reply = await backend().call("talk", {
+      session_id: state.sessionId,
+      message,
+      spec: buildSpec(),
+      // What the pipeline last measured, so "will this print?" is answered from
+      // the numbers rather than from a guess.
+      context: state.lastPreview ? state.lastPreview.summary : {},
+      history: state.chat.slice(-10),
+      use_claude: $("chat-use-claude").checked,
+    });
+    waiting.remove();
+    addTurn("glassprint", reply.text, reply.changes);
+    state.chat.push({ role: "glassprint", text: reply.text });
+    showSuggestions(reply.suggestions);
+
+    if (reply.changes && reply.changes.length) {
+      applySpec(reply.spec);
+      schedulePreview(0);
+    }
+  } catch (error) {
+    waiting.remove();
+    addTurn("glassprint", error.message);
+  }
 }
 
 /* --------------------------------------------------------- overlay slots */
@@ -837,6 +1009,7 @@ async function loadCapabilities() {
     const data = await backend().capabilities();
     state.capabilities = data;
     $("claude-row").hidden = !data.claude;
+    $("chat-claude-row").hidden = !data.claude;
 
     // With no server there is nowhere on disk to write to, so the folder field
     // goes away and the export arrives as a download instead.
@@ -863,6 +1036,23 @@ function init() {
   wireDropZone("base");
   wireDropZone("overlay");
   $("add-overlay").addEventListener("click", addOverlaySlot);
+
+  $("chat-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    sendMessage();
+  });
+  // Enter sends; shift-Enter is a newline, as anywhere else you type a message.
+  $("chat-message").addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      sendMessage();
+    }
+  });
+  showSuggestions([
+    "keep the flowers, drop the white background",
+    "tile it four across",
+    "fade it downward over five ink layers",
+  ]);
 
   bindSegmented("target-modes", (value) => {
     state.target = value;

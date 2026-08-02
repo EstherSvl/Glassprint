@@ -260,3 +260,44 @@ button.ghost:hover { color: var(--text); border-color: var(--accent); }
 }
 #colour-answer .ask b { font-variant-numeric: tabular-nums; letter-spacing: .02em; }
 #colour-answer .warn { color: var(--warn, #d9a441); margin: 6px 0 0; }
+
+/* The conversation.
+ *
+ * It sits at the top of the panel because describing what you want is meant to
+ * be the first thing you reach for, not a feature tucked behind the sliders.
+ * The controls below it are then the fine adjustment, and they stay in step:
+ * anything said here writes straight into them. */
+.chat { gap: 8px; }
+.chat-log {
+  display: flex; flex-direction: column; gap: 7px;
+  max-height: 260px; overflow-y: auto;
+  padding-right: 2px;
+}
+.chat-log:empty { display: none; }
+.chat-turn { font-size: 12px; line-height: 1.45; padding: 7px 10px; border-radius: 9px; }
+.chat-turn.you {
+  align-self: flex-end; max-width: 88%;
+  color: #1a1505; background: var(--accent);
+}
+.chat-turn.glassprint {
+  align-self: flex-start; max-width: 95%;
+  color: var(--text); background: var(--panel); border: 1px solid var(--line);
+}
+.chat-turn.thinking { color: var(--muted); font-style: italic; }
+/* What moved, listed under the reply. Saying it in prose is not enough — the
+   sliders below have just changed and you should be able to see which ones. */
+.chat-turn .moved {
+  display: block; margin-top: 5px; padding-top: 5px;
+  font-size: 11px; color: var(--muted); border-top: 1px solid var(--line);
+}
+.chat-turn .moved code { font-size: 10.5px; color: var(--accent); }
+.chat-input { display: flex; gap: 8px; align-items: flex-end; }
+.chat-input textarea { flex: 1; resize: vertical; min-height: 44px; }
+.chat-input button { white-space: nowrap; }
+#chat-suggestions:empty { display: none; }
+#chat-suggestions button {
+  padding: 4px 9px; font: inherit; font-size: 11px; cursor: pointer;
+  color: var(--muted); background: none;
+  border: 1px dashed var(--line); border-radius: 999px;
+}
+#chat-suggestions button:hover { color: var(--text); border-color: var(--accent); border-style: solid; }

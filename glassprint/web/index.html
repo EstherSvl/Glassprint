@@ -22,6 +22,24 @@
 <main>
   <aside class="panel" id="controls">
 
+    <section class="card chat" id="chat-card">
+      <h2>Say what you want</h2>
+      <div class="chat-log" id="chat-log"></div>
+      <div class="chips" id="chat-suggestions"></div>
+      <form class="chat-input" id="chat-form">
+        <textarea
+          id="chat-message"
+          rows="2"
+          placeholder="tile it four across and fade it downward over five ink layers"
+        ></textarea>
+        <button type="submit" class="primary" id="chat-send">Send</button>
+      </form>
+      <label class="checkbox" id="chat-claude-row" hidden>
+        <input type="checkbox" id="chat-use-claude" />
+        <span>Let Claude read the ones I can't</span>
+      </label>
+    </section>
+
     <section class="card">
       <h2>1 · Images</h2>
       <div class="drops">

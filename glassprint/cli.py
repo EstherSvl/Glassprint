@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import List, Optional
 
@@ -95,6 +95,7 @@ def compose_command(
     overlay: List[Path] = typer.Argument(..., exists=True, dir_okay=False, help="Pattern or motif to apply. Give several to stack them."),
     out: Path = typer.Option(Path("out"), "--out", "-o", help="Output directory."),
     keep: List[str] = typer.Option([], "--keep", "-k", help="What to keep/remove. Repeat to say something different for each overlay."),
+    describe: str = typer.Option("", "--describe", "-d", help="Say what you want in plain English; it sets the options below."),
     target: str = typer.Option("alpha", "--target", help="alpha | describe | largest | full | rect"),
     target_describe: str = typer.Option("", "--target-describe", help="Describe the area to fill."),
     fit: str = typer.Option("auto", "--fit", help="auto | shape | contain | cover | tile | stretch"),
@@ -256,6 +257,25 @@ def compose_command(
                 for one_keep, one_opacity, one_blend in zip(keeps, opacities, blends)
             ],
         )
+
+    # A sentence is read *after* the flags, so it wins where the two disagree —
+    # you reach for --describe to change your mind about what you typed.
+    if describe:
+        from . import talk
+        from .bridge import build_spec as spec_from_payload
+
+        payload = asdict(spec)
+        changes = talk.read(describe, payload)
+        if not changes:
+            typer.secho(
+                f"  did not read a setting in {describe!r} — composing as given",
+                fg=typer.colors.YELLOW,
+            )
+        else:
+            spec = spec_from_payload(talk.apply(payload, changes))
+            for change in changes:
+                if change.said:
+                    typer.echo(f"  read: {change.said}")
 
     backends = Backends()
     result = compose(base_raster, overlay_rasters, spec, backends)
