@@ -227,6 +227,33 @@ work exactly. Object names fall back to the colour in the phrase (so *"the red
 roses"* still works) and the tool tells you it did so, in the readout under the
 preview.
 
+### When the background cannot be removed by colour
+
+Some artwork cannot be cut out this way, and the tool now says so rather than
+returning a confident mess. The case that taught it: white orchids photographed
+on white paper. Measured across the whole tolerance range, the petals and the
+shadow they cast move together — the best the colour heuristic ever manages is
+to keep two fifths of the flower and a fifth of the paper. There is no setting
+that fixes it, so tuning the number gives you a different bad answer.
+
+You get a note saying the kept and removed parts are barely different colours,
+and the honest remedies: cut the subject out before importing, or install the
+`smart` extra so rembg does it by shape.
+
+Two related things it *does* handle, which it used to get wrong:
+
+- **Artwork whose motifs run off the canvas edge.** A repeat is exactly that, so
+  the border of the tile can be more flower than paper. The ground used to be
+  taken as the median of the border, which in that case is the flower — so the
+  tool removed the motifs and kept the paper. On a white plate the result looks
+  fine right up until you print it on coloured glass. The ground is now chosen
+  by which colour both runs round the edge *and* covers area.
+- **Backdrops that are not one colour.** A studio sweep falls off toward the
+  corners. Measured against a single colour, both ends of the sweep read as
+  subject and come along with it. A plane is now fitted through the border, so
+  a smooth fall-off is tracked; on a genuinely flat ground it comes back flat
+  and nothing changes.
+
 **With the `smart` extra**, object names are handled by CLIPSeg and the subject
 cutout by rembg — no phrasing changes needed, the same instructions just get
 sharper.
@@ -243,6 +270,12 @@ This is the part that decides whether the print looks right on the object.
 - **`--fit auto`** (the default) counts the separate marks in the artwork. Many
   scattered marks means a repeating pattern, so it tiles; one big shape means a
   motif, so it scales to fit the target once.
+- Transparent margins around a motif are ignored when it is sized and centred.
+  Procreate hands you whatever canvas you drew on, and scaling that to the
+  target used to scale the empty space with it — a flower filling half its
+  canvas landed at about seventy per cent of the size you asked for, pushed
+  off-centre by however lopsided the padding was. A tile is left alone: its
+  canvas *is* the repeat, and trimming it would change the spacing.
 - **`--repeat-mm 20`** sets the physical size of one repeat on the glass. This is
   usually what you want — it is independent of resolution and canvas size.
 - **`--repeats 4`** instead sets how many times the pattern repeats across the
@@ -986,6 +1019,34 @@ result = compose(base, art, ComposeSpec(
 print(result.summary())
 export(result, "exports/", ExportSpec(formats=["png", "tiff"], width_mm=180, dpi=300))
 ```
+
+## The visual test suite
+
+```bash
+python tools/make_gallery.py gallery
+```
+
+Composes a spread of realistic jobs — a plate, a vase, a coaster, a phone case
+with a lens cutout, a wood photo with no alpha at all; against a photographed
+orchid, an already-cut-out one, a graded backdrop, a seamless repeat, scattered
+motifs, line art, a single sprig — and writes `gallery/_sheet.png` to look at,
+plus the three numbers per job that separate a good result from a plausible one:
+
+| | |
+| --- | --- |
+| `kept` | how much of the artwork survived the cut-out. Near zero kept nothing; near one did not remove the background |
+| `fills` | how much of the target shape the ink covers. A motif that landed one pixel wide shows up here and nowhere else |
+| `spill` | ink outside the target shape. With clipping on this must be zero |
+
+The artwork in `tools/gallery_art.py` is drawn rather than photographed, so it
+is byte-identical run to run, and each piece carries one property that breaks
+something: pale subjects on pale ground, soft edges and cast shadows,
+backgrounds that are not flat, silhouettes that are nothing like their bounding
+box, an alpha hole that is a lens and not a place to print.
+
+`tests/test_gallery.py` runs the same jobs with those judgements written down as
+assertions. Every one of them started as something visible in the contact sheet
+and invisible in the tests that used flat shapes on flat white.
 
 ## Development
 

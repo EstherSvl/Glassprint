@@ -138,12 +138,95 @@ class Backends:
             return None
 
 
-def background_mask(raster: Raster, tolerance: float = 1.0) -> np.ndarray:
-    """Detect a flat-ish background by growing inwards from the image border.
+#: How the eye weighs the channels when judging "is that the same colour".
+_CHANNEL_WEIGHTS = np.array([0.30, 0.59, 0.11], dtype=np.float32)
+
+
+def _border_samples(rgb: np.ndarray, ring: int) -> tuple[np.ndarray, np.ndarray]:
+    """Border pixels and where on the canvas each one came from."""
+    h, w = rgb.shape[:2]
+    ys, xs = np.mgrid[0:h, 0:w]
+    edge = np.zeros((h, w), dtype=bool)
+    edge[:ring, :] = edge[-ring:, :] = True
+    edge[:, :ring] = edge[:, -ring:] = True
+    return rgb[edge], np.stack([ys[edge], xs[edge]], axis=1).astype(np.float32)
+
+
+def _candidate_grounds(border: np.ndarray, limit: int = 4) -> list[np.ndarray]:
+    """The handful of distinct colours the border is actually made of.
+
+    The median used to stand in for this, and it is only the background when
+    the background is most of the border. Artwork whose motifs run off the edge
+    of the canvas — which is what a repeat *is* — can put more red along the
+    border than white, and then the median is red and the tool confidently
+    removes the flowers and keeps the paper.
+    """
+    quantised = np.round(border * 12.0).astype(np.int16)
+    keys, index, counts = np.unique(quantised, axis=0, return_inverse=True, return_counts=True)
+    order = np.argsort(counts)[::-1][:limit]
+    return [border[index == bucket].mean(axis=0) for bucket in order]
+
+
+def _ground_field(
+    reference: np.ndarray,
+    border: np.ndarray,
+    where: np.ndarray,
+    shape: tuple[int, int],
+    radius: float,
+) -> np.ndarray:
+    """Predict the ground's colour at every pixel, not just its average.
+
+    A studio backdrop falls off toward one corner and a scanned sheet is
+    brighter under the lamp. Measuring every pixel against one colour then
+    fails at both ends of the sweep: the tool keeps the top and bottom of the
+    backdrop as though they were the subject.
+
+    So a plane is fitted through the border pixels that match the reference —
+    the lowest-order thing that can express "gets darker downwards". On a truly
+    flat ground the fit comes back flat and this is exactly what it always was.
+    """
+    h, w = shape
+    dist = np.sqrt((((border - reference[None, :]) ** 2) * _CHANNEL_WEIGHTS[None, :]).sum(axis=-1))
+    belongs = dist < radius
+    if belongs.sum() < 24:
+        return np.broadcast_to(reference.astype(np.float32), (h, w, 3))
+
+    ys, xs = where[belongs, 0] / max(h - 1, 1), where[belongs, 1] / max(w - 1, 1)
+    design = np.stack([np.ones_like(ys), ys, xs], axis=1)
+    try:
+        coeffs, *_ = np.linalg.lstsq(design, border[belongs], rcond=None)
+    except np.linalg.LinAlgError:
+        return np.broadcast_to(reference.astype(np.float32), (h, w, 3))
+
+    grid_y, grid_x = np.mgrid[0:h, 0:w]
+    full = np.stack(
+        [np.ones((h, w)), grid_y / max(h - 1, 1), grid_x / max(w - 1, 1)], axis=-1
+    ).astype(np.float32)
+    return np.clip(full @ coeffs.astype(np.float32), 0.0, 1.0)
+
+
+def _perimeter_reach(mask: np.ndarray) -> float:
+    """How much of the canvas edge this region runs along.
+
+    The test that tells a ground from a motif. Background touches most of the
+    way round; a flower bleeding off one corner does not, however much of the
+    border it happens to occupy there.
+    """
+    edge = np.concatenate([mask[0, :], mask[-1, :], mask[:, 0], mask[:, -1]])
+    return float((edge > 0.5).mean())
+
+
+def background_mask(
+    raster: Raster, tolerance: float = 1.0, backends: "Backends | None" = None
+) -> np.ndarray:
+    """Detect the ground the artwork sits on, working inwards from the border.
 
     This is the no-model path, and it is the right one for most exported
     artwork: patterns and motifs from Procreate or Affinity usually sit on a
     flat white, transparent or single-colour ground.
+
+    Two things it does *not* assume, both learned from artwork that broke it:
+    that the border is mostly background, and that the ground is one colour.
     """
     alpha = raster.alpha_f
     if (alpha < 0.5).mean() > 0.02:
@@ -153,26 +236,70 @@ def background_mask(raster: Raster, tolerance: float = 1.0) -> np.ndarray:
     rgb = raster.rgb_f
     h, w = rgb.shape[:2]
     ring = max(1, int(round(min(h, w) * 0.01)))
-    border = np.concatenate(
-        [
-            rgb[:ring, :, :].reshape(-1, 3),
-            rgb[-ring:, :, :].reshape(-1, 3),
-            rgb[:, :ring, :].reshape(-1, 3),
-            rgb[:, -ring:, :].reshape(-1, 3),
-        ]
-    )
-    reference = np.median(border, axis=0)
-
-    weights = np.array([0.30, 0.59, 0.11], dtype=np.float32)
-    dist = np.sqrt((((rgb - reference[None, None, :]) ** 2) * weights[None, None, :]).sum(axis=-1))
+    border, where = _border_samples(rgb, ring)
     radius = 0.13 * max(tolerance, 0.05)
-    near = np.clip(1.0 - dist / radius, 0.0, 1.0).astype(np.float32)
 
-    # Only count regions connected to the edge, so a white flower centre in the
-    # middle of the artwork is not mistaken for background.
-    connected = masks.touching_border(near, threshold=0.5)
-    connected = masks.despeckle(connected, min_area_fraction=0.0005)
-    return masks.clean(np.minimum(near, masks.feather(connected, 1.0) * 1.2))
+    # Try each colour the border is made of and keep whichever behaves like a
+    # ground. Two properties together, because neither settles it alone: a
+    # ground runs round the edge of the canvas, *and* it covers ground. Reach
+    # alone picks the red dots out of a repeat, where motifs legitimately own
+    # most of the border; area alone picks a subject that fills the frame.
+    best_score = -1.0
+    best: np.ndarray | None = None
+    best_dist: np.ndarray | None = None
+    for reference in _candidate_grounds(border):
+        field = _ground_field(reference, border, where, (h, w), radius)
+        dist = np.sqrt((((rgb - field) ** 2) * _CHANNEL_WEIGHTS[None, None, :]).sum(axis=-1))
+        near = np.clip(1.0 - dist / radius, 0.0, 1.0).astype(np.float32)
+
+        # Only count regions connected to the edge, so a white flower centre in
+        # the middle of the artwork is not mistaken for background.
+        connected = masks.despeckle(
+            masks.touching_border(near, threshold=0.5), min_area_fraction=0.0005
+        )
+        score = _perimeter_reach(connected) * float(connected.mean())
+        if score > best_score:
+            best_score, best, best_dist = score, masks.clean(
+                np.minimum(near, masks.feather(connected, 1.0) * 1.2)
+            ), dist
+
+    if best is None:
+        return masks.zeros((h, w))
+
+    if backends is not None:
+        if best_score < 0.25:
+            backends.note(
+                "Could not find a clear ground behind this artwork — nothing in it both "
+                "runs round the edge and covers much area. Removing the background by "
+                "colour will be rough: cut it out before importing, or install the "
+                "'smart' extra for a subject cutout."
+            )
+        elif _too_close_to_call(best, best_dist, radius):
+            backends.note(
+                "What was kept is barely a different colour from what was removed — a pale "
+                "subject on pale ground, or a cast shadow on the paper. No tolerance "
+                "setting separates those, so expect halos and holes: cut the artwork out "
+                "before importing, or install the 'smart' extra for a subject cutout."
+            )
+    return best
+
+
+def _too_close_to_call(background: np.ndarray, dist: np.ndarray, radius: float) -> bool:
+    """Whether the subject is actually a different colour from its ground.
+
+    Worth measuring rather than assuming, because when it is not there is no
+    setting that helps. White orchids photographed on white paper were the case
+    that showed it: at every tolerance the flowers and the shadow they cast
+    move together, and the best the tool ever manages is to keep two fifths of
+    the flower and a fifth of the paper. Tuning the number produces a different
+    bad answer, not a good one.
+
+    So the tool says which situation it is in instead of quietly picking one.
+    """
+    kept = (1.0 - background) > 0.5
+    if not kept.any():
+        return False
+    return float(np.median(dist[kept])) < radius * 1.5
 
 
 def resolve(
@@ -192,13 +319,13 @@ def resolve(
         return masks.clean(raster.alpha_f)
 
     if kind == "background":
-        return background_mask(raster, tolerance=selector.tolerance)
+        return background_mask(raster, tolerance=selector.tolerance, backends=backends)
 
     if kind == "subject":
         found = backends.subject_mask(raster)
         if found is not None:
             return found
-        return masks.invert(background_mask(raster, tolerance=selector.tolerance))
+        return masks.invert(background_mask(raster, tolerance=selector.tolerance, backends=backends))
 
     if kind == "color":
         if not selector.value:

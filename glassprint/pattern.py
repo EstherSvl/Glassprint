@@ -178,12 +178,45 @@ def place(
     return np.array(canvas, dtype=np.uint8)
 
 
+def _trimmed(source: Image.Image) -> Image.Image:
+    """The artwork without its transparent margins.
+
+    A motif exported from Procreate or Affinity comes on whatever canvas it was
+    drawn on, and the drawing is rarely centred in it or anywhere near its
+    edges. Scaling that canvas to the target scales the empty space with it: a
+    flower occupying half its canvas lands at about seventy per cent of the size
+    it was asked for, pushed off-centre by however lopsided the padding was.
+
+    So the margins go before anything is measured. This is what you would do by
+    hand — crop the export — and it makes "fit it to the shape" mean the artwork
+    rather than the file it arrived in.
+
+    Only for single placement. A tile's canvas *is* the repeat, and trimming it
+    would change the spacing between motifs, which is the one thing about a
+    repeat you must not touch.
+    """
+    alpha = np.array(source, dtype=np.uint8)[:, :, 3]
+    if (alpha > 86).all():
+        return source  # opaque edge to edge; nothing to trim
+    box = masks.bbox(alpha.astype(np.float32) / 255.0, threshold=0.34)
+    if box is None:
+        return source  # nothing visible at all — leave it be rather than crash
+    left, top, right, bottom = box
+    if (right - left) < 2 or (bottom - top) < 2:
+        return source
+    return source.crop((left, top, right, bottom))
+
+
 def _render_single(source: Image.Image, box: tuple[int, int], placement: Placement, fit: str) -> Image.Image:
     box_w, box_h = box
+    source = _trimmed(source)
     if placement.rotation:
         source = source.rotate(
             -placement.rotation, resample=Image.BICUBIC, expand=True, fillcolor=(0, 0, 0, 0)
         )
+        # Rotating with expand pads the corners back out, so the artwork would
+        # be measured against a box it no longer fills.
+        source = _trimmed(source)
 
     if fit == "stretch":
         width = max(1, int(round(box_w * placement.scale)))
